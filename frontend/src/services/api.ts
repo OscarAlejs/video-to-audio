@@ -2,7 +2,7 @@
 
 import type { ExtractRequest, HealthStatus, Job, LogsResponse, LogsStats, Stats, VideoInfo } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const API_URL = import.meta.env.VITE_API_URL || 'https://videoconverter-api.8r3zyw.easypanel.host/api';
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
