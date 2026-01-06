@@ -2,7 +2,7 @@
 
 import type { ExtractRequest, HealthStatus, Job, LogsResponse, LogsStats, Stats, VideoInfo } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
