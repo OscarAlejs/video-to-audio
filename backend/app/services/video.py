@@ -23,6 +23,11 @@ def get_base_ydl_opts() -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["mweb", "android", "web"],
+            }
+        },
     }
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
@@ -113,7 +118,7 @@ def download_and_extract(
     
     ydl_opts = {
         **get_base_ydl_opts(),
-        "format": "ba/w/b",
+        "format": "bestaudio/best",
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
