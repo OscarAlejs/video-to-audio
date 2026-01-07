@@ -11,11 +11,11 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade yt-dlp
 
 COPY app/ ./app/
 COPY cookies.tx[t] ./
 
-# Dar permisos y ownership al usuario
 RUN chown -R appuser:appuser /app && chmod -R 755 /app
 
 RUN mkdir -p /tmp/video-to-audio && chown appuser:appuser /tmp/video-to-audio
