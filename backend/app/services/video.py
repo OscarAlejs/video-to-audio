@@ -111,9 +111,9 @@ def download_and_extract(
             if progress_callback:
                 progress_callback("extracting", 90)
     
-    ydl_opts = {
+ ydl_opts = {
         **get_base_ydl_opts(),
-        "format": "bestaudio*/best",
+        "format": "ba/w/b",
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
