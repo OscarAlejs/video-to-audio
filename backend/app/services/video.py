@@ -111,7 +111,7 @@ def download_and_extract(
             if progress_callback:
                 progress_callback("extracting", 90)
     
- ydl_opts = {
+    ydl_opts = {
         **get_base_ydl_opts(),
         "format": "ba/w/b",
         "outtmpl": output_template,
