@@ -1,6 +1,7 @@
 """
 Servicio de almacenamiento en Supabase
 """
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -31,27 +32,25 @@ def get_supabase_client() -> Client:
     return _client
 
 
+def sanitize_filename(filename: str) -> str:
+    """Elimina caracteres no permitidos del nombre de archivo"""
+    sanitized = re.sub(r'[<>:"/\\|?*\[\](){}#&]', '_', filename)
+    sanitized = re.sub(r'_+', '_', sanitized)
+    return sanitized.strip('_')
+
+
 def upload_file(file_path: Path, folder: str = "audio") -> str:
     """
     Sube archivo a Supabase Storage
-    
-    Args:
-        file_path: Path al archivo local
-        folder: Carpeta destino en el bucket
-    
-    Returns:
-        URL pública del archivo
     """
     settings = get_settings()
     client = get_supabase_client()
     
-    # Generar nombre único
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_name = file_path.name.replace(" ", "_").replace("(", "").replace(")", "")
+    safe_name = sanitize_filename(file_path.name)
     storage_path = f"{folder}/{timestamp}_{safe_name}"
     
-    # Determinar content-type
-    extension = file_path.suffix.lower()[1:]  # sin el punto
+    extension = file_path.suffix.lower()[1:]
     content_types = {
         "mp3": "audio/mpeg",
         "m4a": "audio/mp4",
@@ -60,18 +59,15 @@ def upload_file(file_path: Path, folder: str = "audio") -> str:
     }
     content_type = content_types.get(extension, "audio/mpeg")
     
-    # Leer archivo
     with open(file_path, "rb") as f:
         file_data = f.read()
     
-    # Subir
     client.storage.from_(settings.supabase_bucket).upload(
         path=storage_path,
         file=file_data,
         file_options={"content-type": content_type}
     )
     
-    # Obtener URL pública
     public_url = client.storage.from_(settings.supabase_bucket).get_public_url(storage_path)
     
     return public_url
