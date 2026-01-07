@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Código
 COPY app/ ./app/
+COPY cookies.tx[t] ./
 
 # Directorio temporal
 RUN mkdir -p /tmp/video-to-audio && chown appuser:appuser /tmp/video-to-audio
