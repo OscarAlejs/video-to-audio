@@ -15,8 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY cookies.tx[t] ./
 
-# Dar permisos al archivo de cookies
-RUN chmod 644 /app/cookies.txt 2>/dev/null || true
+# Dar permisos y ownership al usuario
+RUN chown -R appuser:appuser /app && chmod -R 755 /app
 
 RUN mkdir -p /tmp/video-to-audio && chown appuser:appuser /tmp/video-to-audio
 
