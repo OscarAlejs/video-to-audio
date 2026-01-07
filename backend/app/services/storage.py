@@ -34,7 +34,9 @@ def get_supabase_client() -> Client:
 
 def sanitize_filename(filename: str) -> str:
     """Elimina caracteres no permitidos del nombre de archivo"""
-    sanitized = re.sub(r'[<>:"/\\|?*\[\](){}#&]', '_', filename)
+    # Solo permitir: letras, números, guión, underscore, punto
+    sanitized = re.sub(r'[^a-zA-Z0-9_\-.]', '_', filename)
+    # Eliminar underscores múltiples
     sanitized = re.sub(r'_+', '_', sanitized)
     return sanitized.strip('_')
 
@@ -42,6 +44,13 @@ def sanitize_filename(filename: str) -> str:
 def upload_file(file_path: Path, folder: str = "audio") -> str:
     """
     Sube archivo a Supabase Storage
+    
+    Args:
+        file_path: Path al archivo local
+        folder: Carpeta destino en el bucket
+    
+    Returns:
+        URL pública del archivo
     """
     settings = get_settings()
     client = get_supabase_client()
