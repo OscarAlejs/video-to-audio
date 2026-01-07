@@ -14,6 +14,20 @@ from ..models import AudioFormat, AudioQuality, VideoInfo
 TEMP_DIR = Path("/tmp/video-to-audio")
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
+# Cookies de YouTube (opcional)
+COOKIES_FILE = Path("/app/cookies.txt")
+
+
+def get_base_ydl_opts() -> dict:
+    """Opciones base para yt-dlp incluyendo cookies si existen"""
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+    }
+    if COOKIES_FILE.exists():
+        opts["cookiefile"] = str(COOKIES_FILE)
+    return opts
+
 
 def format_duration(seconds: int) -> str:
     """Formatea segundos a formato legible"""
@@ -38,8 +52,7 @@ def format_file_size(bytes_size: int) -> str:
 def get_video_info(url: str) -> VideoInfo:
     """Obtiene información del video sin descargarlo"""
     ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
+        **get_base_ydl_opts(),
         "extract_flat": False,
     }
     
@@ -67,15 +80,6 @@ def download_and_extract(
 ) -> tuple[Path, VideoInfo]:
     """
     Descarga video y extrae audio
-    
-    Args:
-        url: URL del video
-        output_format: Formato de salida
-        quality: Calidad del audio
-        progress_callback: Callback para reportar progreso (stage, percent)
-    
-    Returns:
-        Tuple de (path al archivo, info del video)
     """
     settings = get_settings()
     unique_id = str(uuid.uuid4())[:8]
@@ -108,10 +112,9 @@ def download_and_extract(
                 progress_callback("extracting", 90)
     
     ydl_opts = {
+        **get_base_ydl_opts(),
         "format": "bestaudio/best",
         "outtmpl": output_template,
-        "quiet": True,
-        "no_warnings": True,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
         "postprocessors": [{
@@ -126,7 +129,6 @@ def download_and_extract(
         
         duration = info.get("duration", 0) or 0
         
-        # Verificar duración
         if duration > settings.max_duration_minutes * 60:
             raise ValueError(
                 f"Video muy largo ({duration // 60} min). "
@@ -143,7 +145,6 @@ def download_and_extract(
             channel=info.get("channel") or info.get("uploader"),
         )
         
-        # Buscar archivo generado
         for file in TEMP_DIR.glob(f"{unique_id}_*"):
             if file.suffix == f".{output_format.value}":
                 return file, video_info
