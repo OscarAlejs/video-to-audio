@@ -113,7 +113,7 @@ def download_and_extract(
     
     ydl_opts = {
         **get_base_ydl_opts(),
-        "format": "bestaudio/best",
+        "format": "bestaudio*/best",
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
