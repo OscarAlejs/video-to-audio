@@ -19,6 +19,9 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 # Cobalt API
 COBALT_API = "https://api.cobalt.tools/api/json"
 
+# Cookies de YouTube
+COOKIES_FILE = Path("/app/cookies.txt")
+
 
 def format_duration(seconds: int) -> str:
     """Formatea segundos a formato legible"""
@@ -45,11 +48,21 @@ def is_youtube_url(url: str) -> bool:
     return any(x in url.lower() for x in ['youtube.com', 'youtu.be'])
 
 
+def get_base_ydl_opts() -> dict:
+    """Opciones base para yt-dlp"""
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+    }
+    if COOKIES_FILE.exists():
+        opts["cookiefile"] = str(COOKIES_FILE)
+    return opts
+
+
 def get_video_info(url: str) -> VideoInfo:
     """Obtiene información del video sin descargarlo"""
     ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
+        **get_base_ydl_opts(),
         "extract_flat": False,
     }
     
@@ -176,8 +189,7 @@ def download_with_ytdlp(
                 progress_callback("extracting", 90)
     
     ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
+        **get_base_ydl_opts(),
         "format": "bestaudio/best",
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
@@ -200,6 +212,37 @@ def download_with_ytdlp(
     raise FileNotFoundError("No se encontró el archivo de audio")
 
 
+def get_youtube_info_basic(url: str) -> VideoInfo:
+    """Obtiene info básica de YouTube sin autenticación"""
+    import re
+    
+    # Extraer video ID
+    video_id = None
+    patterns = [
+        r'(?:v=|/)([\w-]{11})',
+        r'youtu\.be/([\w-]{11})',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            video_id = match.group(1)
+            break
+    
+    if not video_id:
+        video_id = "unknown"
+    
+    # Retornar info mínima - Cobalt se encargará de la descarga
+    return VideoInfo(
+        id=video_id,
+        title="YouTube Video",
+        duration_seconds=0,
+        duration_formatted="--:--",
+        thumbnail=f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+        source="youtube",
+        channel=None,
+    )
+
+
 def download_and_extract(
     url: str,
     output_format: AudioFormat = AudioFormat.MP3,
@@ -213,20 +256,22 @@ def download_and_extract(
     settings = get_settings()
     unique_id = str(uuid.uuid4())[:8]
     
-    # Obtener info del video primero
-    video_info = get_video_info(url)
-    
-    # Verificar duración
-    if video_info.duration_seconds > settings.max_duration_minutes * 60:
-        raise ValueError(
-            f"Video muy largo ({video_info.duration_seconds // 60} min). "
-            f"Máximo permitido: {settings.max_duration_minutes} min"
-        )
-    
-    # Descargar usando el método apropiado
+    # Obtener info del video
     if is_youtube_url(url):
+        # Para YouTube, usar info básica (evita el bot check)
+        video_info = get_youtube_info_basic(url)
         audio_file = download_with_cobalt(url, output_format, quality, unique_id, progress_callback)
     else:
+        # Para otros sitios, usar yt-dlp normal
+        video_info = get_video_info(url)
+        
+        # Verificar duración
+        if video_info.duration_seconds > settings.max_duration_minutes * 60:
+            raise ValueError(
+                f"Video muy largo ({video_info.duration_seconds // 60} min). "
+                f"Máximo permitido: {settings.max_duration_minutes} min"
+            )
+        
         audio_file = download_with_ytdlp(url, output_format, quality, unique_id, progress_callback)
     
     return audio_file, video_info
