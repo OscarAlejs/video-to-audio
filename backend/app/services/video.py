@@ -39,11 +39,6 @@ def get_base_ydl_opts() -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["tv_embedded"],
-            }
-        },
     }
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
@@ -100,7 +95,6 @@ def download_and_extract(
     
     ydl_opts = {
         **get_base_ydl_opts(),
-        "format": "ba/b",
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
@@ -109,6 +103,8 @@ def download_and_extract(
             "preferredcodec": output_format.value,
             "preferredquality": quality.value,
         }],
+        # Sin especificar formato - yt-dlp elige automáticamente
+        "extract_audio": True,
     }
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
