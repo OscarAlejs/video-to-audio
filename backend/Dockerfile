@@ -1,25 +1,23 @@
-# Backend - Video to Audio API
 FROM python:3.12-slim
 
-# Instalar ffmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Usuario no-root
 RUN useradd -m -u 1000 appuser
 
 WORKDIR /app
 
-# Dependencias
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Código
 COPY app/ ./app/
 COPY cookies.tx[t] ./
 
-# Directorio temporal
+# Dar permisos al archivo de cookies
+RUN chmod 644 /app/cookies.txt 2>/dev/null || true
+
 RUN mkdir -p /tmp/video-to-audio && chown appuser:appuser /tmp/video-to-audio
 
 USER appuser
