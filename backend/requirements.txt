@@ -5,3 +5,4 @@ supabase==2.11.0
 python-multipart==0.0.19
 pydantic-settings==2.7.0
 requests==2.32.3
+pybalt>=2025.7.0
