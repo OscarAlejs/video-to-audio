@@ -25,8 +25,12 @@ def get_base_ydl_opts() -> dict:
         "no_warnings": True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["mweb", "android", "web"],
+                "player_client": ["ios", "web"],
+                "player_skip": ["webpage", "configs"],
             }
+        },
+        "http_headers": {
+            "User-Agent": "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)",
         },
     }
     if COOKIES_FILE.exists():
@@ -118,7 +122,7 @@ def download_and_extract(
     
     ydl_opts = {
         **get_base_ydl_opts(),
-        "format": "bestaudio/best",
+        "format": "best",
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
