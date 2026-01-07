@@ -1,20 +1,6 @@
-# Video to Audio Backend
-# Python 3.11+
-
-# Framework
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-
-# Video Processing
-yt-dlp==2024.12.23
-
-# Supabase
+yt-dlp>=2025.12.01
 supabase==2.11.0
-
-# Config & Validation
-pydantic==2.10.4
-pydantic-settings==2.7.1
-python-dotenv==1.0.1
-
-# Utilities
-python-multipart==0.0.18
+python-multipart==0.0.19
+pydantic-settings==2.7.0
