@@ -2,12 +2,13 @@
 Servicio de descarga y extracción de audio
 """
 import uuid
-import requests
 import subprocess
+import asyncio
 from pathlib import Path
 from typing import Callable, Optional
 
 import yt_dlp
+from pybalt import Cobalt
 
 from ..config import get_settings
 from ..models import AudioFormat, AudioQuality, VideoInfo
@@ -15,9 +16,6 @@ from ..models import AudioFormat, AudioQuality, VideoInfo
 
 TEMP_DIR = Path("/tmp/video-to-audio")
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
-
-# Cobalt API
-COBALT_API = "https://api.cobalt.tools/api/json"
 
 # Cookies de YouTube
 COOKIES_FILE = Path("/app/cookies.txt")
@@ -59,8 +57,37 @@ def get_base_ydl_opts() -> dict:
     return opts
 
 
+def get_video_info_from_url(url: str) -> VideoInfo:
+    """Obtiene info básica de YouTube desde la URL"""
+    import re
+    
+    video_id = None
+    patterns = [
+        r'(?:v=|/)([\w-]{11})',
+        r'youtu\.be/([\w-]{11})',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            video_id = match.group(1)
+            break
+    
+    if not video_id:
+        video_id = "unknown"
+    
+    return VideoInfo(
+        id=video_id,
+        title="YouTube Video",
+        duration_seconds=0,
+        duration_formatted="--:--",
+        thumbnail=f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+        source="youtube",
+        channel=None,
+    )
+
+
 def get_video_info(url: str) -> VideoInfo:
-    """Obtiene información del video sin descargarlo"""
+    """Obtiene información del video usando yt-dlp"""
     ydl_opts = {
         **get_base_ydl_opts(),
         "extract_flat": False,
@@ -89,71 +116,63 @@ def download_with_cobalt(
     unique_id: str,
     progress_callback: Optional[Callable[[str, int], None]] = None,
 ) -> Path:
-    """Descarga audio usando Cobalt API"""
+    """Descarga audio usando pybalt (Cobalt)"""
     
     if progress_callback:
         progress_callback("downloading", 10)
     
-    # Llamar a Cobalt API
-    response = requests.post(
-        COBALT_API,
-        json={
-            "url": url,
-            "isAudioOnly": True,
-            "aFormat": "mp3",
-            "filenamePattern": "basic",
-        },
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        },
-        timeout=30,
-    )
-    
-    if response.status_code != 200:
-        raise Exception(f"Cobalt API error: {response.status_code}")
-    
-    data = response.json()
-    
-    if data.get("status") == "error":
-        raise Exception(f"Cobalt error: {data.get('text', 'Unknown error')}")
-    
-    download_url = data.get("url")
-    if not download_url:
-        raise Exception("No download URL returned from Cobalt")
+    # Crear cliente Cobalt
+    cobalt = Cobalt(url)
+    cobalt.audio_only()
+    cobalt.audio_format("mp3")
     
     if progress_callback:
         progress_callback("downloading", 30)
     
-    # Descargar el archivo
-    audio_response = requests.get(download_url, stream=True, timeout=300)
-    if audio_response.status_code != 200:
-        raise Exception(f"Download error: {audio_response.status_code}")
+    # Descargar
+    output_path = str(TEMP_DIR)
     
-    # Guardar como archivo temporal
-    temp_file = TEMP_DIR / f"{unique_id}_cobalt.mp3"
-    with open(temp_file, "wb") as f:
-        for chunk in audio_response.iter_content(chunk_size=8192):
-            f.write(chunk)
+    # Ejecutar descarga de forma síncrona
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(cobalt.download(output_path))
+    finally:
+        loop.close()
     
     if progress_callback:
         progress_callback("extracting", 60)
     
-    # Convertir al formato deseado si no es MP3
-    if output_format.value != "mp3":
-        output_file = TEMP_DIR / f"{unique_id}_output.{output_format.value}"
+    # Buscar archivo descargado
+    downloaded_file = None
+    for file in TEMP_DIR.glob("*"):
+        if file.is_file() and file.stat().st_mtime > 0:
+            # Verificar si es un archivo reciente
+            import time
+            if time.time() - file.stat().st_mtime < 60:
+                downloaded_file = file
+                break
+    
+    if not downloaded_file:
+        raise FileNotFoundError("No se encontró el archivo descargado")
+    
+    # Renombrar/convertir si es necesario
+    final_file = TEMP_DIR / f"{unique_id}_cobalt.{output_format.value}"
+    
+    if output_format.value != "mp3" or downloaded_file.suffix != f".{output_format.value}":
         subprocess.run([
-            "ffmpeg", "-i", str(temp_file),
+            "ffmpeg", "-i", str(downloaded_file),
             "-b:a", f"{quality.value}k",
-            "-y", str(output_file)
+            "-y", str(final_file)
         ], capture_output=True, check=True)
-        temp_file.unlink()
-        temp_file = output_file
+        downloaded_file.unlink()
+    else:
+        downloaded_file.rename(final_file)
     
     if progress_callback:
         progress_callback("extracting", 90)
     
-    return temp_file
+    return final_file
 
 
 def download_with_ytdlp(
@@ -204,43 +223,11 @@ def download_with_ytdlp(
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.extract_info(url, download=True)
     
-    # Buscar archivo generado
     for file in TEMP_DIR.glob(f"{unique_id}_*"):
         if file.suffix == f".{output_format.value}":
             return file
     
     raise FileNotFoundError("No se encontró el archivo de audio")
-
-
-def get_youtube_info_basic(url: str) -> VideoInfo:
-    """Obtiene info básica de YouTube sin autenticación"""
-    import re
-    
-    # Extraer video ID
-    video_id = None
-    patterns = [
-        r'(?:v=|/)([\w-]{11})',
-        r'youtu\.be/([\w-]{11})',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            video_id = match.group(1)
-            break
-    
-    if not video_id:
-        video_id = "unknown"
-    
-    # Retornar info mínima - Cobalt se encargará de la descarga
-    return VideoInfo(
-        id=video_id,
-        title="YouTube Video",
-        duration_seconds=0,
-        duration_formatted="--:--",
-        thumbnail=f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
-        source="youtube",
-        channel=None,
-    )
 
 
 def download_and_extract(
@@ -256,16 +243,14 @@ def download_and_extract(
     settings = get_settings()
     unique_id = str(uuid.uuid4())[:8]
     
-    # Obtener info del video
     if is_youtube_url(url):
-        # Para YouTube, usar info básica (evita el bot check)
-        video_info = get_youtube_info_basic(url)
+        # Para YouTube, usar Cobalt (pybalt)
+        video_info = get_video_info_from_url(url)
         audio_file = download_with_cobalt(url, output_format, quality, unique_id, progress_callback)
     else:
-        # Para otros sitios, usar yt-dlp normal
+        # Para otros sitios, usar yt-dlp
         video_info = get_video_info(url)
         
-        # Verificar duración
         if video_info.duration_seconds > settings.max_duration_minutes * 60:
             raise ValueError(
                 f"Video muy largo ({video_info.duration_seconds // 60} min). "
