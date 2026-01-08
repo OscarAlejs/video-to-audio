@@ -54,7 +54,6 @@ export function LogsPanel() {
     }
   }, [activeTab, isOpen]);
 
-  // Auto-refresh cada 5 segundos cuando está abierto
   useEffect(() => {
     if (!isOpen) return;
     
@@ -126,7 +125,6 @@ export function LogsPanel() {
 
   return (
     <div className="mt-8 w-full max-w-4xl mx-auto">
-      {/* Toggle Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center justify-between px-4 py-3 bg-gray-800/50 hover:bg-gray-800/70 border border-gray-700/50 rounded-xl transition"
@@ -152,10 +150,8 @@ export function LogsPanel() {
         </svg>
       </button>
 
-      {/* Panel Content */}
       {isOpen && (
         <div className="mt-2 bg-gray-800/50 backdrop-blur-xl border border-gray-700/50 rounded-xl overflow-hidden">
-          {/* Stats Summary */}
           {stats && (
             <div className="grid grid-cols-5 gap-2 p-4 border-b border-gray-700/50">
               <div className="text-center">
@@ -181,7 +177,6 @@ export function LogsPanel() {
             </div>
           )}
 
-          {/* Tabs */}
           <div className="flex items-center justify-between border-b border-gray-700/50 px-4">
             <div className="flex">
               {tabs.map((tab) => (
@@ -212,7 +207,6 @@ export function LogsPanel() {
             </button>
           </div>
 
-          {/* Logs List */}
           <div className="max-h-96 overflow-y-auto">
             {isLoading && logs.length === 0 ? (
               <div className="flex items-center justify-center py-12">
@@ -233,10 +227,8 @@ export function LogsPanel() {
                 {logs.map((log) => (
                   <div key={log.id} className="p-4 hover:bg-gray-700/20 transition">
                     <div className="flex items-start justify-between gap-4">
-                      {/* Left side */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          {/* Source Badge */}
                           <span
                             className={`px-2 py-0.5 text-xs font-medium rounded ${
                               log.source === 'api'
@@ -246,31 +238,27 @@ export function LogsPanel() {
                           >
                             {log.source.toUpperCase()}
                           </span>
-                          {/* Status Badge */}
                           {getStatusBadge(log.status)}
-                          {/* Time */}
                           <span className="text-xs text-gray-500">{formatDate(log.created_at)}</span>
-                          {/* Progress if processing */}
                           {['pending', 'processing', 'downloading', 'extracting', 'uploading'].includes(log.status) && (
                             <span className="text-xs text-cyan-400">{log.progress}%</span>
                           )}
                         </div>
 
-                        {/* Video Title */}
                         <h4 className="text-sm font-medium text-white truncate">
                           {truncateTitle(log.video_title)}
                         </h4>
 
-                        {/* Details */}
-                        {log.status === 'completed' ? (
+                        {log.status === 'completed' && (
                           <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
                             {log.format && <span>📁 {log.format.toUpperCase()}</span>}
                             {log.quality && <span>🎵 {log.quality}kbps</span>}
                             {log.file_size && <span>💾 {log.file_size}</span>}
                             {log.video_duration && <span>⏱️ {formatDuration(log.video_duration)}</span>}
-                            {log.processing_time && <span>⚡ {log.processing_time}s</span>}
+                            {log.processing_time && <span>⚡ {log.processing_time.toFixed(1)}s</span>}
                           </div>
-                        ) : log.status === 'failed' ? (
+                        )}
+                        {log.status === 'failed' && (
                           <div className="mt-1">
                             {log.error_code && (
                               <span className="text-xs text-red-400 font-mono">{log.error_code}</span>
@@ -279,21 +267,21 @@ export function LogsPanel() {
                               <p className="text-xs text-red-300 mt-0.5 line-clamp-2">{log.error_message}</p>
                             )}
                           </div>
-                        ) : (
+                        )}
+                        {!['completed', 'failed'].includes(log.status) && (
                           <div className="mt-1">
                             <span className="text-xs text-gray-400">{log.stage}</span>
                           </div>
                         )}
                       </div>
 
-                      {/* Right side - Audio URL button */}
                       {log.status === 'completed' && log.audio_url && (
                         
                           href={log.audio_url}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex-shrink-0 p-2 text-gray-400 hover:text-white bg-gray-700/50 hover:bg-gray-700 rounded-lg transition"
-                          title="Abrir audio"
+                          title="Descargar audio"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
