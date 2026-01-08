@@ -255,7 +255,7 @@ export function LogsPanel() {
                         )}
                       </div>
                       {log.status === 'completed' && log.audio_url && (
-                        
+                        <a
                           href={log.audio_url}
                           target="_blank"
                           rel="noopener noreferrer"
