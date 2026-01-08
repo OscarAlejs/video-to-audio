@@ -1,6 +1,6 @@
 // API Service para comunicación con el backend
 
-import type { ExtractRequest, HealthStatus, Job, JobLog, LogsResponse, LogsStats, Stats, VideoInfo } from '../types';
+import type { ExtractRequest, HealthStatus, Job, LogsResponse, LogsStats, Stats, VideoInfo } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://videoconverter-api.8r3zyw.easypanel.host/api';
 
