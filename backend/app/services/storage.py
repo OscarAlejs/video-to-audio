@@ -3,6 +3,7 @@ Servicio de almacenamiento en Supabase con soporte para archivos grandes (TUS)
 """
 import re
 import base64
+import time
 import requests
 from datetime import datetime
 from pathlib import Path
@@ -89,10 +90,10 @@ def upload_file_direct(file_path: Path, folder: str = "audio") -> str:
     return public_url
 
 
-def upload_file_tus(file_path: Path, folder: str = "audio") -> str:
+def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 3) -> str:
     """
     Upload resumible (TUS) para archivos grandes (> 5MB).
-    Sube en chunks de 6MB para evitar timeouts de Cloudflare.
+    Sube en chunks de 5MB con reintentos automáticos.
     """
     settings = get_settings()
     
@@ -112,6 +113,15 @@ def upload_file_tus(file_path: Path, folder: str = "audio") -> str:
     }
     content_type = content_types.get(extension, "audio/mpeg")
     
+    # Crear sesión HTTP con configuración optimizada
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(
+        max_retries=3,
+        pool_connections=1,
+        pool_maxsize=1
+    )
+    session.mount('https://', adapter)
+    
     # Paso 1: Crear upload session
     tus_url = f"{settings.supabase_url}/storage/v1/upload/resumable"
     
@@ -123,7 +133,7 @@ def upload_file_tus(file_path: Path, folder: str = "audio") -> str:
         "Tus-Resumable": "1.0.0",
     }
     
-    response = requests.post(tus_url, headers=headers, timeout=30)
+    response = session.post(tus_url, headers=headers, timeout=60)
     
     if response.status_code != 201:
         raise Exception(f"Error creando upload TUS: {response.status_code} - {response.text}")
@@ -132,38 +142,71 @@ def upload_file_tus(file_path: Path, folder: str = "audio") -> str:
     if not upload_url:
         raise Exception("No se recibió Location header de TUS")
     
-    # Paso 2: Subir en chunks de 6MB
-    chunk_size = 6 * 1024 * 1024  # 6MB
+    # Paso 2: Subir en chunks de 5MB con reintentos
+    chunk_size = 5 * 1024 * 1024  # 5MB
     offset = 0
     
     with open(file_path, "rb") as f:
         while offset < file_size:
+            f.seek(offset)
             chunk = f.read(chunk_size)
             chunk_len = len(chunk)
             
-            patch_headers = {
-                "Authorization": f"Bearer {settings.supabase_key}",
-                "Upload-Offset": str(offset),
-                "Content-Type": "application/offset+octet-stream",
-                "Tus-Resumable": "1.0.0",
-            }
-            
-            patch_response = requests.patch(
-                upload_url,
-                headers=patch_headers,
-                data=chunk,
-                timeout=120
-            )
-            
-            if patch_response.status_code not in [200, 204]:
-                raise Exception(f"Error subiendo chunk en offset {offset}: {patch_response.status_code} - {patch_response.text}")
-            
-            # Actualizar offset
-            new_offset = patch_response.headers.get("Upload-Offset")
-            if new_offset:
-                offset = int(new_offset)
-            else:
-                offset += chunk_len
+            # Reintentos para cada chunk
+            for attempt in range(max_retries):
+                try:
+                    patch_headers = {
+                        "Authorization": f"Bearer {settings.supabase_key}",
+                        "Upload-Offset": str(offset),
+                        "Content-Type": "application/offset+octet-stream",
+                        "Content-Length": str(chunk_len),
+                        "Tus-Resumable": "1.0.0",
+                    }
+                    
+                    patch_response = session.patch(
+                        upload_url,
+                        headers=patch_headers,
+                        data=chunk,
+                        timeout=180
+                    )
+                    
+                    if patch_response.status_code in [200, 204]:
+                        # Éxito - actualizar offset
+                        new_offset = patch_response.headers.get("Upload-Offset")
+                        if new_offset:
+                            offset = int(new_offset)
+                        else:
+                            offset += chunk_len
+                        break  # Salir del loop de reintentos
+                    else:
+                        raise Exception(f"Status {patch_response.status_code}: {patch_response.text}")
+                        
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        # Esperar antes de reintentar
+                        wait_time = (attempt + 1) * 2
+                        time.sleep(wait_time)
+                        
+                        # Verificar offset actual en servidor
+                        try:
+                            head_response = session.head(
+                                upload_url,
+                                headers={
+                                    "Authorization": f"Bearer {settings.supabase_key}",
+                                    "Tus-Resumable": "1.0.0",
+                                },
+                                timeout=30
+                            )
+                            if head_response.status_code == 200:
+                                server_offset = head_response.headers.get("Upload-Offset")
+                                if server_offset:
+                                    offset = int(server_offset)
+                        except:
+                            pass
+                    else:
+                        raise Exception(f"Error subiendo chunk después de {max_retries} intentos: {str(e)}")
+    
+    session.close()
     
     # Construir URL pública
     public_url = f"{settings.supabase_url}/storage/v1/object/public/{settings.supabase_bucket}/{storage_path}"
