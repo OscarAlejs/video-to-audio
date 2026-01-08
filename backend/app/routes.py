@@ -1,9 +1,11 @@
 """
 Rutas de la API
 """
+import os
 import time
 import asyncio
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import StreamingResponse
 
 from .config import get_settings
 from .models import (
@@ -175,6 +177,141 @@ async def process_video(request: ProcessRequest):
             message=str(e),
             processing_time=processing_time,
         )
+
+
+# ============== API Mode - Download Direct ==============
+
+@router.post("/process/download")
+async def process_and_download(request: ProcessRequest):
+    """
+    **Modo API** - Procesa y devuelve el archivo de audio directamente.
+    Ideal para n8n cuando necesitas el binario del audio.
+    """
+    start_time = time.time()
+    settings = get_settings()
+    
+    if not storage.is_configured():
+        raise HTTPException(status_code=503, detail="Supabase no configurado")
+    
+    # Crear job en Supabase
+    job_data = db.create_job(
+        video_url=request.video_url,
+        format=request.format.value,
+        quality=request.quality.value,
+        source="api"
+    )
+    job_id = job_data["id"]
+    
+    try:
+        # 1. Obtener info del video
+        db.update_job(job_id, status="processing", progress=10, stage="Obteniendo información...")
+        
+        video_info = await asyncio.to_thread(video.get_video_info, request.video_url)
+        
+        # Guardar info del video
+        db.update_job(
+            job_id,
+            video_title=video_info.title,
+            video_id=video_info.id,
+            video_duration=video_info.duration_seconds,
+            video_thumbnail=video_info.thumbnail,
+            video_source=video_info.source,
+            video_channel=video_info.channel,
+        )
+        
+        # 2. Verificar duración
+        if video_info.duration_seconds > settings.max_duration_minutes * 60:
+            db.update_job(
+                job_id,
+                status="failed",
+                error_code="VIDEO_TOO_LONG",
+                error_message=f"Video muy largo ({video_info.duration_seconds // 60} min)"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video muy largo ({video_info.duration_seconds // 60} min). Máximo: {settings.max_duration_minutes} min"
+            )
+        
+        # 3. Descargar y extraer
+        db.update_job(job_id, status="downloading", progress=30, stage="Descargando...")
+        
+        audio_file, video_info = await asyncio.to_thread(
+            video.download_and_extract,
+            request.video_url,
+            request.format,
+            request.quality,
+            None,
+        )
+        
+        # 4. Leer el archivo en memoria
+        db.update_job(job_id, status="uploading", progress=70, stage="Preparando...")
+        
+        with open(audio_file, "rb") as f:
+            audio_data = f.read()
+        
+        file_size = len(audio_data)
+        file_size_formatted = video.format_file_size(file_size)
+        filename = os.path.basename(str(audio_file))
+        
+        # 5. Subir a Supabase (backup)
+        db.update_job(job_id, progress=85, stage="Subiendo backup...")
+        audio_url = await asyncio.to_thread(storage.upload_file, audio_file)
+        
+        # 6. Limpiar archivo temporal
+        video.cleanup_file(audio_file)
+        
+        # 7. Calcular tiempo
+        processing_time = round(time.time() - start_time, 2)
+        
+        # 8. Actualizar job como completado
+        db.update_job(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="Completado",
+            audio_url=audio_url,
+            file_size=file_size_formatted,
+            processing_time=processing_time,
+        )
+        
+        # 9. Determinar content type
+        content_types = {
+            "mp3": "audio/mpeg",
+            "m4a": "audio/mp4",
+            "wav": "audio/wav",
+            "opus": "audio/opus"
+        }
+        content_type = content_types.get(request.format.value, "audio/mpeg")
+        
+        # 10. Devolver archivo directamente
+        return StreamingResponse(
+            iter([audio_data]),
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(file_size),
+                "X-Audio-URL": audio_url,
+                "X-Job-ID": job_id,
+                "X-Video-Title": video_info.title[:100] if video_info.title else "",
+                "X-Processing-Time": str(processing_time),
+                "X-File-Size": file_size_formatted,
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        processing_time = round(time.time() - start_time, 2)
+        
+        db.update_job(
+            job_id,
+            status="failed",
+            error_code="INTERNAL_ERROR",
+            error_message=str(e),
+            processing_time=processing_time,
+        )
+        
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============== Extraction (Async) ==============
