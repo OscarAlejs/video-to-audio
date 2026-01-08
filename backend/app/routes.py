@@ -7,18 +7,15 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from .config import get_settings
 from .models import (
-    ExecutionLog,
-    ExecutionSource,
     ExtractRequest,
     HealthResponse,
     JobResponse,
-    LogsResponse,
     ProcessRequest,
     ProcessResponse,
     StatsResponse,
     VideoInfo,
 )
-from .services import jobs, storage, video, logs
+from .services import jobs, storage, video, db
 from . import __version__
 
 
@@ -43,11 +40,7 @@ async def health_check():
 
 @router.get("/info", response_model=VideoInfo)
 async def get_video_info(url: str):
-    """
-    Obtiene información de un video sin descargarlo
-    
-    - **url**: URL de YouTube o Vimeo
-    """
+    """Obtiene información de un video sin descargarlo"""
     try:
         info = video.get_video_info(url)
         return info
@@ -60,54 +53,53 @@ async def get_video_info(url: str):
 @router.post("/process", response_model=ProcessResponse)
 async def process_video(request: ProcessRequest):
     """
-    **Modo API** - Procesa un video de forma síncrona y retorna la URL del audio.
-    
-    Este endpoint espera a que termine todo el proceso y devuelve el resultado directamente.
-    Ideal para integraciones con n8n, Make, Zapier, etc.
-    
-    **Request:**
-    ```json
-    {
-        "video_url": "https://youtube.com/watch?v=...",
-        "format": "mp3",
-        "quality": "192"
-    }
-    ```
-    
-    **Response (success):**
-    ```json
-    {
-        "status": "success",
-        "audio_url": "https://xxx.supabase.co/storage/...",
-        "video_info": {...},
-        "file_size": 4567890,
-        "duration": 180,
-        "format": "mp3",
-        "quality": "192",
-        "processing_time": 45.2
-    }
-    ```
-    
-    **Timeout:** Este endpoint puede tardar varios minutos dependiendo del video.
-    Configura timeout alto en tu cliente HTTP (recomendado: 5-10 minutos).
+    **Modo API** - Procesa un video de forma síncrona.
+    Guarda el job en Supabase para auditoría.
     """
     start_time = time.time()
     settings = get_settings()
     
-    # Verificar Supabase
     if not storage.is_configured():
         return ProcessResponse(
             status="error",
             error_code="SUPABASE_NOT_CONFIGURED",
-            message="Supabase no está configurado. Define SUPABASE_URL y SUPABASE_KEY"
+            message="Supabase no está configurado"
         )
+    
+    # Crear job en Supabase
+    job_data = db.create_job(
+        video_url=request.video_url,
+        format=request.format.value,
+        quality=request.quality.value,
+        source="api"
+    )
+    job_id = job_data["id"]
     
     try:
         # 1. Obtener info del video
+        db.update_job(job_id, status="processing", progress=10, stage="Obteniendo información...")
+        
         video_info = await asyncio.to_thread(video.get_video_info, request.video_url)
+        
+        # Guardar info del video
+        db.update_job(
+            job_id,
+            video_title=video_info.title,
+            video_id=video_info.id,
+            video_duration=video_info.duration_seconds,
+            video_thumbnail=video_info.thumbnail,
+            video_source=video_info.source,
+            video_channel=video_info.channel,
+        )
         
         # 2. Verificar duración
         if video_info.duration_seconds > settings.max_duration_minutes * 60:
+            db.update_job(
+                job_id,
+                status="failed",
+                error_code="VIDEO_TOO_LONG",
+                error_message=f"Video muy largo ({video_info.duration_seconds // 60} min)"
+            )
             return ProcessResponse(
                 status="error",
                 error_code="VIDEO_TOO_LONG",
@@ -115,16 +107,20 @@ async def process_video(request: ProcessRequest):
                 video_info=video_info,
             )
         
-        # 3. Descargar y extraer audio
+        # 3. Descargar y extraer
+        db.update_job(job_id, status="downloading", progress=30, stage="Descargando...")
+        
         audio_file, video_info = await asyncio.to_thread(
             video.download_and_extract,
             request.video_url,
             request.format,
             request.quality,
-            None,  # Sin callback de progreso
+            None,
         )
         
         # 4. Subir a Supabase
+        db.update_job(job_id, status="uploading", progress=80, stage="Subiendo...")
+        
         audio_url = await asyncio.to_thread(storage.upload_file, audio_file)
         
         # 5. Obtener tamaño
@@ -134,20 +130,17 @@ async def process_video(request: ProcessRequest):
         # 6. Limpiar archivo temporal
         video.cleanup_file(audio_file)
         
-        # 7. Calcular tiempo de procesamiento
+        # 7. Calcular tiempo
         processing_time = round(time.time() - start_time, 2)
         
-        # 8. Registrar log de éxito (API)
-        logs.add_log(
-            source=ExecutionSource.API,
-            video_url=request.video_url,
-            status="success",
-            video_title=video_info.title,
+        # 8. Actualizar job como completado
+        db.update_job(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="Completado",
             audio_url=audio_url,
-            file_size_formatted=file_size_formatted,
-            duration_formatted=video_info.duration_formatted,
-            format=request.format.value,
-            quality=request.quality.value,
+            file_size=file_size_formatted,
             processing_time=processing_time,
         )
         
@@ -165,49 +158,17 @@ async def process_video(request: ProcessRequest):
             message="Audio extraído exitosamente",
         )
         
-    except ValueError as e:
-        processing_time = round(time.time() - start_time, 2)
-        # Registrar log de error (API)
-        logs.add_log(
-            source=ExecutionSource.API,
-            video_url=request.video_url,
-            status="error",
-            error_code="VALIDATION_ERROR",
-            error_message=str(e),
-            processing_time=processing_time,
-        )
-        return ProcessResponse(
-            status="error",
-            error_code="VALIDATION_ERROR",
-            message=str(e),
-            processing_time=processing_time,
-        )
-    except FileNotFoundError as e:
-        processing_time = round(time.time() - start_time, 2)
-        logs.add_log(
-            source=ExecutionSource.API,
-            video_url=request.video_url,
-            status="error",
-            error_code="EXTRACTION_FAILED",
-            error_message=str(e),
-            processing_time=processing_time,
-        )
-        return ProcessResponse(
-            status="error",
-            error_code="EXTRACTION_FAILED",
-            message=str(e),
-            processing_time=processing_time,
-        )
     except Exception as e:
         processing_time = round(time.time() - start_time, 2)
-        logs.add_log(
-            source=ExecutionSource.API,
-            video_url=request.video_url,
-            status="error",
+        
+        db.update_job(
+            job_id,
+            status="failed",
             error_code="INTERNAL_ERROR",
             error_message=str(e),
             processing_time=processing_time,
         )
+        
         return ProcessResponse(
             status="error",
             error_code="INTERNAL_ERROR",
@@ -216,34 +177,21 @@ async def process_video(request: ProcessRequest):
         )
 
 
-@router.post("/process-video", response_model=ProcessResponse)
-async def process_video_alt(request: ProcessRequest):
-    """
-    Alias de /process para compatibilidad con documentación técnica.
-    Mismo funcionamiento que POST /process
-    """
-    return await process_video(request)
-
-
-# ============== Extraction ==============
+# ============== Extraction (Async) ==============
 
 @router.post("/extract", response_model=JobResponse)
 async def start_extraction(request: ExtractRequest, background_tasks: BackgroundTasks):
-    """
-    Inicia la extracción de audio de un video
-    
-    Retorna un job_id para consultar el estado con GET /jobs/{job_id}
-    """
+    """Inicia extracción asíncrona - retorna job_id para polling"""
     if not storage.is_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Supabase no está configurado. Define SUPABASE_URL y SUPABASE_KEY"
-        )
+        raise HTTPException(status_code=503, detail="Supabase no configurado")
     
-    # Crear job
-    job = jobs.create_job()
+    job = jobs.create_job(
+        video_url=request.url,
+        format=request.format.value,
+        quality=request.quality.value,
+        source="web"
+    )
     
-    # Procesar en background
     background_tasks.add_task(jobs.process_job, job.job_id, request)
     
     return job
@@ -259,18 +207,19 @@ async def list_jobs():
 
 @router.get("/jobs/stats", response_model=StatsResponse)
 async def get_job_stats():
-    """Obtiene estadísticas de jobs"""
+    """Estadísticas de jobs"""
     stats = jobs.get_stats()
-    return StatsResponse(**stats)
+    return StatsResponse(
+        total_jobs=stats["total"],
+        completed_jobs=stats["completed"],
+        failed_jobs=stats["failed"],
+        active_jobs=stats["processing"] + stats["pending"],
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(job_id: str):
-    """
-    Obtiene el estado de un job de extracción
-    
-    - **job_id**: ID del job retornado por POST /extract
-    """
+    """Obtiene estado de un job"""
     job = jobs.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
@@ -285,6 +234,42 @@ async def delete_job(job_id: str):
     raise HTTPException(status_code=404, detail="Job no encontrado")
 
 
+# ============== Logs (ahora desde jobs table) ==============
+
+@router.get("/logs")
+async def get_logs(limit: int = 50):
+    """Obtiene historial de jobs"""
+    jobs_list = db.list_jobs(limit=limit)
+    return {"total": len(jobs_list), "logs": jobs_list}
+
+
+@router.get("/logs/api")
+async def get_api_logs(limit: int = 50):
+    """Jobs desde API"""
+    jobs_list = db.list_jobs(source="api", limit=limit)
+    return {"total": len(jobs_list), "logs": jobs_list}
+
+
+@router.get("/logs/web")
+async def get_web_logs(limit: int = 50):
+    """Jobs desde Web"""
+    jobs_list = db.list_jobs(source="web", limit=limit)
+    return {"total": len(jobs_list), "logs": jobs_list}
+
+
+@router.get("/logs/errors")
+async def get_error_logs(limit: int = 50):
+    """Jobs con errores"""
+    jobs_list = db.list_jobs(status="failed", limit=limit)
+    return {"total": len(jobs_list), "logs": jobs_list}
+
+
+@router.get("/logs/stats")
+async def get_logs_stats():
+    """Estadísticas"""
+    return db.get_jobs_stats()
+
+
 # ============== Maintenance ==============
 
 @router.post("/cleanup")
@@ -292,51 +277,4 @@ async def cleanup():
     """Limpia archivos y jobs antiguos"""
     files_cleaned = video.cleanup_old_files()
     jobs_cleaned = jobs.cleanup_old_jobs()
-    
-    return {
-        "files_cleaned": files_cleaned,
-        "jobs_cleaned": jobs_cleaned,
-    }
-
-
-# ============== Execution Logs ==============
-
-@router.get("/logs", response_model=LogsResponse)
-async def get_all_logs(limit: int = 50):
-    """Obtiene todos los logs de ejecución"""
-    all_logs = logs.get_all_logs(limit)
-    return LogsResponse(total=len(all_logs), logs=all_logs)
-
-
-@router.get("/logs/api", response_model=LogsResponse)
-async def get_api_logs(limit: int = 50):
-    """Obtiene logs de ejecuciones vía API"""
-    api_logs = logs.get_api_logs(limit)
-    return LogsResponse(total=len(api_logs), logs=api_logs)
-
-
-@router.get("/logs/web", response_model=LogsResponse)
-async def get_web_logs(limit: int = 50):
-    """Obtiene logs de ejecuciones vía Web App"""
-    web_logs = logs.get_web_logs(limit)
-    return LogsResponse(total=len(web_logs), logs=web_logs)
-
-
-@router.get("/logs/errors", response_model=LogsResponse)
-async def get_error_logs(limit: int = 50):
-    """Obtiene solo logs con errores"""
-    error_logs = logs.get_error_logs(limit)
-    return LogsResponse(total=len(error_logs), logs=error_logs)
-
-
-@router.get("/logs/stats")
-async def get_logs_stats():
-    """Obtiene estadísticas de ejecuciones"""
-    return logs.get_stats()
-
-
-@router.delete("/logs")
-async def clear_all_logs():
-    """Limpia todos los logs"""
-    count = logs.clear_logs()
-    return {"message": f"Se eliminaron {count} logs"}
+    return {"files_cleaned": files_cleaned, "jobs_cleaned": jobs_cleaned}
