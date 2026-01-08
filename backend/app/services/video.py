@@ -98,13 +98,13 @@ def download_and_extract(
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
+        # ESTO ES LO IMPORTANTE - descargar SOLO audio
+        "format": "bestaudio/best",
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": output_format.value,
             "preferredquality": quality.value,
         }],
-        # Sin especificar formato - yt-dlp elige automáticamente
-        "extract_audio": True,
     }
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
