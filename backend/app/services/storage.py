@@ -5,6 +5,8 @@ import re
 import base64
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -44,22 +46,46 @@ def _b64encode(s: str) -> str:
     return base64.b64encode(s.encode()).decode()
 
 
+def _create_http_session() -> requests.Session:
+    """Crea sesión HTTP optimizada para uploads grandes"""
+    session = requests.Session()
+    
+    # Configurar reintentos
+    retry_strategy = Retry(
+        total=5,
+        backoff_factor=1,
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "POST", "PATCH"],
+    )
+    
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy,
+        pool_connections=1,
+        pool_maxsize=1,
+    )
+    
+    session.mount('https://', adapter)
+    session.mount('http://', adapter)
+    
+    return session
+
+
 def upload_file(file_path: Path, folder: str = "audio") -> str:
     """
     Sube archivo a Supabase Storage.
-    Usa TUS (resumable) para archivos > 5MB, upload directo para menores.
+    Usa TUS (resumable) para archivos > 4MB, upload directo para menores.
     """
     file_size = file_path.stat().st_size
     
-    # Usar TUS para archivos > 5MB
-    if file_size > 5 * 1024 * 1024:
+    # Usar TUS para archivos > 4MB
+    if file_size > 4 * 1024 * 1024:
         return upload_file_tus(file_path, folder)
     else:
         return upload_file_direct(file_path, folder)
 
 
 def upload_file_direct(file_path: Path, folder: str = "audio") -> str:
-    """Upload directo para archivos pequeños (< 5MB)"""
+    """Upload directo para archivos pequeños (< 4MB)"""
     settings = get_settings()
     client = get_supabase_client()
     
@@ -90,10 +116,10 @@ def upload_file_direct(file_path: Path, folder: str = "audio") -> str:
     return public_url
 
 
-def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 3) -> str:
+def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 5) -> str:
     """
-    Upload resumible (TUS) para archivos grandes (> 5MB).
-    Sube en chunks de 5MB con reintentos automáticos.
+    Upload resumible (TUS) para archivos grandes (> 4MB).
+    Sube en chunks de 3MB con reintentos automáticos.
     """
     settings = get_settings()
     
@@ -113,14 +139,8 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 3
     }
     content_type = content_types.get(extension, "audio/mpeg")
     
-    # Crear sesión HTTP con configuración optimizada
-    session = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(
-        max_retries=3,
-        pool_connections=1,
-        pool_maxsize=1
-    )
-    session.mount('https://', adapter)
+    # Crear sesión HTTP
+    session = _create_http_session()
     
     # Paso 1: Crear upload session
     tus_url = f"{settings.supabase_url}/storage/v1/upload/resumable"
@@ -133,17 +153,28 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 3
         "Tus-Resumable": "1.0.0",
     }
     
-    response = session.post(tus_url, headers=headers, timeout=60)
-    
-    if response.status_code != 201:
-        raise Exception(f"Error creando upload TUS: {response.status_code} - {response.text}")
+    for attempt in range(max_retries):
+        try:
+            response = session.post(tus_url, headers=headers, timeout=30)
+            
+            if response.status_code == 201:
+                break
+            elif response.status_code == 413:
+                raise Exception(f"Archivo muy grande para Supabase. Verifica el límite del bucket. Status: {response.status_code}")
+            else:
+                raise Exception(f"Error creando upload TUS: {response.status_code} - {response.text}")
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            raise Exception(f"Error de conexión creando upload TUS: {str(e)}")
     
     upload_url = response.headers.get("Location")
     if not upload_url:
         raise Exception("No se recibió Location header de TUS")
     
-    # Paso 2: Subir en chunks de 5MB con reintentos
-    chunk_size = 5 * 1024 * 1024  # 5MB
+    # Paso 2: Subir en chunks de 3MB (más pequeños para evitar timeouts)
+    chunk_size = 3 * 1024 * 1024  # 3MB
     offset = 0
     
     with open(file_path, "rb") as f:
@@ -153,6 +184,7 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 3
             chunk_len = len(chunk)
             
             # Reintentos para cada chunk
+            chunk_uploaded = False
             for attempt in range(max_retries):
                 try:
                     patch_headers = {
@@ -167,7 +199,7 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 3
                         upload_url,
                         headers=patch_headers,
                         data=chunk,
-                        timeout=180
+                        timeout=120  # 2 minutos por chunk
                     )
                     
                     if patch_response.status_code in [200, 204]:
@@ -177,17 +209,17 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 3
                             offset = int(new_offset)
                         else:
                             offset += chunk_len
-                        break  # Salir del loop de reintentos
+                        chunk_uploaded = True
+                        break
                     else:
                         raise Exception(f"Status {patch_response.status_code}: {patch_response.text}")
                         
-                except Exception as e:
+                except (requests.exceptions.RequestException, Exception) as e:
                     if attempt < max_retries - 1:
-                        # Esperar antes de reintentar
-                        wait_time = (attempt + 1) * 2
+                        wait_time = min(2 ** attempt, 30)
                         time.sleep(wait_time)
                         
-                        # Verificar offset actual en servidor
+                        # Recuperar offset del servidor
                         try:
                             head_response = session.head(
                                 upload_url,
@@ -195,16 +227,21 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 3
                                     "Authorization": f"Bearer {settings.supabase_key}",
                                     "Tus-Resumable": "1.0.0",
                                 },
-                                timeout=30
+                                timeout=15
                             )
                             if head_response.status_code == 200:
                                 server_offset = head_response.headers.get("Upload-Offset")
                                 if server_offset:
                                     offset = int(server_offset)
+                                    f.seek(offset)
                         except:
                             pass
+                        continue
                     else:
-                        raise Exception(f"Error subiendo chunk después de {max_retries} intentos: {str(e)}")
+                        raise Exception(f"Error subiendo chunk offset {offset} después de {max_retries} intentos: {str(e)}")
+            
+            if not chunk_uploaded:
+                raise Exception(f"No se pudo subir chunk en offset {offset}")
     
     session.close()
     
