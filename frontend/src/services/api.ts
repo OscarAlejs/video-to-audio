@@ -1,6 +1,6 @@
 // API Service para comunicación con el backend
 
-import type { ExtractRequest, HealthStatus, Job, LogsResponse, LogsStats, Stats, VideoInfo } from '../types';
+import type { ExtractRequest, HealthStatus, Job, JobLog, LogsResponse, LogsStats, Stats, VideoInfo } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://videoconverter-api.8r3zyw.easypanel.host/api';
 
@@ -68,7 +68,7 @@ export const api = {
     }
   },
 
-  // ============== Logs ==============
+  // ============== Logs (desde tabla jobs) ==============
 
   // Get All Logs
   async getAllLogs(limit: number = 50): Promise<LogsResponse> {
@@ -89,7 +89,7 @@ export const api = {
   },
 
   // Get Error Logs
-  async getErrorLogs(limit: number = 50): Promise<LogsResponse> {
+  async getErrorLogs(limit: int = 50): Promise<LogsResponse> {
     const response = await fetch(`${API_URL}/logs/errors?limit=${limit}`);
     return handleResponse<LogsResponse>(response);
   },
@@ -98,14 +98,6 @@ export const api = {
   async getLogsStats(): Promise<LogsStats> {
     const response = await fetch(`${API_URL}/logs/stats`);
     return handleResponse<LogsStats>(response);
-  },
-
-  // Clear Logs
-  async clearLogs(): Promise<void> {
-    const response = await fetch(`${API_URL}/logs`, { method: 'DELETE' });
-    if (!response.ok) {
-      throw new ApiError(response.status, 'Error al limpiar logs');
-    }
   },
 };
 
