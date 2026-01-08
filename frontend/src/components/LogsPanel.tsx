@@ -1,14 +1,14 @@
-// Panel de Logs de Ejecuciones
+// Panel de Logs de Ejecuciones (desde Supabase)
 
 import { useState, useEffect } from 'react';
-import type { ExecutionLog, LogsStats } from '../types';
+import type { JobLog, LogsStats } from '../types';
 import { api } from '../services/api';
 
 type TabType = 'all' | 'api' | 'web' | 'errors';
 
 export function LogsPanel() {
   const [activeTab, setActiveTab] = useState<TabType>('all');
-  const [logs, setLogs] = useState<ExecutionLog[]>([]);
+  const [logs, setLogs] = useState<JobLog[]>([]);
   const [stats, setStats] = useState<LogsStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
@@ -54,13 +54,17 @@ export function LogsPanel() {
     }
   }, [activeTab, isOpen]);
 
-  const handleClearLogs = async () => {
-    if (window.confirm('¿Estás seguro de eliminar todos los logs?')) {
-      await api.clearLogs();
+  // Auto-refresh cada 5 segundos cuando está abierto
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const interval = setInterval(() => {
       fetchLogs();
       fetchStats();
-    }
-  };
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isOpen, activeTab]);
 
   const formatDate = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -72,16 +76,52 @@ export function LogsPanel() {
     });
   };
 
-  const truncateUrl = (url: string, maxLength: number = 40) => {
-    if (url.length <= maxLength) return url;
-    return url.substring(0, maxLength) + '...';
+  const truncateTitle = (title: string | undefined, maxLength: number = 50) => {
+    if (!title) return 'Sin título';
+    if (title.length <= maxLength) return title;
+    return title.substring(0, maxLength) + '...';
+  };
+
+  const getStatusBadge = (status: string) => {
+    const styles: Record<string, string> = {
+      pending: 'bg-yellow-500/20 text-yellow-400',
+      processing: 'bg-blue-500/20 text-blue-400',
+      downloading: 'bg-blue-500/20 text-blue-400',
+      extracting: 'bg-purple-500/20 text-purple-400',
+      uploading: 'bg-cyan-500/20 text-cyan-400',
+      completed: 'bg-green-500/20 text-green-400',
+      failed: 'bg-red-500/20 text-red-400',
+    };
+    
+    const labels: Record<string, string> = {
+      pending: '⏳ Pendiente',
+      processing: '⚙️ Procesando',
+      downloading: '📥 Descargando',
+      extracting: '🎵 Extrayendo',
+      uploading: '☁️ Subiendo',
+      completed: '✓ Completado',
+      failed: '✗ Error',
+    };
+
+    return (
+      <span className={`px-2 py-0.5 text-xs font-medium rounded ${styles[status] || 'bg-gray-500/20 text-gray-400'}`}>
+        {labels[status] || status}
+      </span>
+    );
+  };
+
+  const formatDuration = (seconds: number | undefined) => {
+    if (!seconds) return '--:--';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const tabs: { id: TabType; label: string; count?: number }[] = [
     { id: 'all', label: 'Todos', count: stats?.total },
     { id: 'api', label: 'API', count: stats?.api_total },
     { id: 'web', label: 'Web', count: stats?.web_total },
-    { id: 'errors', label: 'Errores', count: (stats?.api_errors || 0) + (stats?.web_errors || 0) },
+    { id: 'errors', label: 'Errores', count: stats?.failed },
   ];
 
   return (
@@ -117,7 +157,7 @@ export function LogsPanel() {
         <div className="mt-2 bg-gray-800/50 backdrop-blur-xl border border-gray-700/50 rounded-xl overflow-hidden">
           {/* Stats Summary */}
           {stats && (
-            <div className="grid grid-cols-4 gap-2 p-4 border-b border-gray-700/50">
+            <div className="grid grid-cols-5 gap-2 p-4 border-b border-gray-700/50">
               <div className="text-center">
                 <div className="text-2xl font-bold text-white">{stats.total}</div>
                 <div className="text-xs text-gray-400">Total</div>
@@ -131,9 +171,11 @@ export function LogsPanel() {
                 <div className="text-xs text-gray-400">Web</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-red-400">
-                  {(stats.api_errors || 0) + (stats.web_errors || 0)}
-                </div>
+                <div className="text-2xl font-bold text-green-400">{stats.completed}</div>
+                <div className="text-xs text-gray-400">Completados</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-red-400">{stats.failed}</div>
                 <div className="text-xs text-gray-400">Errores</div>
               </div>
             </div>
@@ -159,31 +201,20 @@ export function LogsPanel() {
                 </button>
               ))}
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={fetchLogs}
-                className="p-2 text-gray-400 hover:text-white transition"
-                title="Refrescar"
-              >
-                <svg className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
-              <button
-                onClick={handleClearLogs}
-                className="p-2 text-gray-400 hover:text-red-400 transition"
-                title="Limpiar logs"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            </div>
+            <button
+              onClick={() => { fetchLogs(); fetchStats(); }}
+              className="p-2 text-gray-400 hover:text-white transition"
+              title="Refrescar"
+            >
+              <svg className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
           </div>
 
           {/* Logs List */}
           <div className="max-h-96 overflow-y-auto">
-            {isLoading ? (
+            {isLoading && logs.length === 0 ? (
               <div className="flex items-center justify-center py-12">
                 <svg className="animate-spin h-8 w-8 text-purple-500" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
@@ -204,7 +235,7 @@ export function LogsPanel() {
                     <div className="flex items-start justify-between gap-4">
                       {/* Left side */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           {/* Source Badge */}
                           <span
                             className={`px-2 py-0.5 text-xs font-medium rounded ${
@@ -216,34 +247,30 @@ export function LogsPanel() {
                             {log.source.toUpperCase()}
                           </span>
                           {/* Status Badge */}
-                          <span
-                            className={`px-2 py-0.5 text-xs font-medium rounded ${
-                              log.status === 'success'
-                                ? 'bg-green-500/20 text-green-400'
-                                : 'bg-red-500/20 text-red-400'
-                            }`}
-                          >
-                            {log.status === 'success' ? '✓ Éxito' : '✗ Error'}
-                          </span>
+                          {getStatusBadge(log.status)}
                           {/* Time */}
-                          <span className="text-xs text-gray-500">{formatDate(log.timestamp)}</span>
+                          <span className="text-xs text-gray-500">{formatDate(log.created_at)}</span>
+                          {/* Progress if processing */}
+                          {['pending', 'processing', 'downloading', 'extracting', 'uploading'].includes(log.status) && (
+                            <span className="text-xs text-cyan-400">{log.progress}%</span>
+                          )}
                         </div>
 
-                        {/* Video Title or URL */}
+                        {/* Video Title */}
                         <h4 className="text-sm font-medium text-white truncate">
-                          {log.video_title || truncateUrl(log.video_url)}
+                          {truncateTitle(log.video_title)}
                         </h4>
 
                         {/* Details */}
-                        {log.status === 'success' ? (
-                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                        {log.status === 'completed' ? (
+                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
                             {log.format && <span>📁 {log.format.toUpperCase()}</span>}
                             {log.quality && <span>🎵 {log.quality}kbps</span>}
-                            {log.file_size_formatted && <span>💾 {log.file_size_formatted}</span>}
-                            {log.duration_formatted && <span>⏱️ {log.duration_formatted}</span>}
+                            {log.file_size && <span>💾 {log.file_size}</span>}
+                            {log.video_duration && <span>⏱️ {formatDuration(log.video_duration)}</span>}
                             {log.processing_time && <span>⚡ {log.processing_time}s</span>}
                           </div>
-                        ) : (
+                        ) : log.status === 'failed' ? (
                           <div className="mt-1">
                             {log.error_code && (
                               <span className="text-xs text-red-400 font-mono">{log.error_code}</span>
@@ -252,12 +279,16 @@ export function LogsPanel() {
                               <p className="text-xs text-red-300 mt-0.5 line-clamp-2">{log.error_message}</p>
                             )}
                           </div>
+                        ) : (
+                          <div className="mt-1">
+                            <span className="text-xs text-gray-400">{log.stage}</span>
+                          </div>
                         )}
                       </div>
 
                       {/* Right side - Audio URL button */}
-                      {log.status === 'success' && log.audio_url && (
-                        <a
+                      {log.status === 'completed' && log.audio_url && (
+                        
                           href={log.audio_url}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -265,7 +296,7 @@ export function LogsPanel() {
                           title="Abrir audio"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                           </svg>
                         </a>
                       )}
