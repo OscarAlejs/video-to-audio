@@ -88,8 +88,8 @@ export const api = {
     return handleResponse<LogsResponse>(response);
   },
 
-  // Get Error Logs
-  async getErrorLogs(limit: int = 50): Promise<LogsResponse> {
+// Get Error Logs
+  async getErrorLogs(limit: number = 50): Promise<LogsResponse> {
     const response = await fetch(`${API_URL}/logs/errors?limit=${limit}`);
     return handleResponse<LogsResponse>(response);
   },
