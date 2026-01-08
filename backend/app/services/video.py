@@ -98,8 +98,9 @@ def download_and_extract(
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
-        # ESTO ES LO IMPORTANTE - descargar SOLO audio
+        # CLAVE: Descargar SOLO audio, no video
         "format": "bestaudio/best",
+        "extract_audio": True,
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": output_format.value,
