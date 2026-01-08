@@ -55,35 +55,42 @@ export interface Stats {
   active_jobs: number;
 }
 
-// Logs Types
-export interface ExecutionLog {
+// Job desde Supabase (tabla jobs)
+export interface JobLog {
   id: string;
-  source: ExecutionSource;
-  timestamp: string;
+  status: string;
+  progress: number;
+  stage: string;
   video_url: string;
   video_title?: string;
-  status: string;
+  video_id?: string;
+  video_duration?: number;
+  video_thumbnail?: string;
+  video_source?: string;
+  video_channel?: string;
+  format: string;
+  quality: string;
   audio_url?: string;
-  file_size_formatted?: string;
-  duration_formatted?: string;
-  format?: string;
-  quality?: string;
-  processing_time?: number;
+  file_size?: string;
   error_code?: string;
   error_message?: string;
+  processing_time?: number;
+  source: ExecutionSource;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface LogsResponse {
   total: number;
-  logs: ExecutionLog[];
+  logs: JobLog[];
 }
 
 export interface LogsStats {
   total: number;
+  pending: number;
+  processing: number;
+  completed: number;
+  failed: number;
   api_total: number;
-  api_success: number;
-  api_errors: number;
   web_total: number;
-  web_success: number;
-  web_errors: number;
 }
