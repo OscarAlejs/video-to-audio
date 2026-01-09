@@ -36,9 +36,16 @@ def format_file_size(bytes_size: int) -> str:
 
 
 def get_base_ydl_opts() -> dict:
+    """Opciones base con anti-throttling"""
     opts = {
         "quiet": True,
         "no_warnings": True,
+        # === OPTIMIZACIÓN DE VELOCIDAD ===
+        "concurrent_fragment_downloads": 4,  # Descargar 4 fragmentos simultáneos
+        "throttled_rate": 100000,  # Si < 100KB/s, re-extraer URL (anti-throttle)
+        "retries": 10,  # Reintentos si falla
+        "fragment_retries": 10,  # Reintentos por fragmento
+        "http_chunk_size": 10485760,  # Chunks de 10MB
     }
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
@@ -98,12 +105,11 @@ def download_and_extract(
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
-        # OPTIMIZADO: Descargar peor video + mejor audio
-        # Esto es MUCHO más rápido que descargar el video completo en alta calidad
-        # Prioridad:
-        # 1. worstvideo+bestaudio = video 144p/240p + mejor audio (~150-300MB)
-        # 2. bestaudio = solo audio si está disponible (~50-100MB)
-        # 3. worst = última opción, peor calidad combinada
+        # === FORMATO OPTIMIZADO ===
+        # Prioridad: peor video + mejor audio (descarga rápida, audio de calidad)
+        # 1. worstvideo+bestaudio = video 144p + mejor audio (~150-300MB/hora)
+        # 2. bestaudio = solo audio si disponible (~50-100MB/hora)
+        # 3. worst = última opción
         "format": "worstvideo+bestaudio/bestaudio/worst",
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
