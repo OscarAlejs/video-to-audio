@@ -36,23 +36,21 @@ def format_file_size(bytes_size: int) -> str:
 
 
 def get_base_ydl_opts() -> dict:
-    """Opciones base con anti-throttling y fixes de conexión"""
+    """Opciones base - estabilidad sobre velocidad"""
     opts = {
         "quiet": True,
         "no_warnings": True,
-        # === OPTIMIZACIÓN DE VELOCIDAD ===
-        "concurrent_fragment_downloads": 4,
-        "throttled_rate": 100000,
+        # === ESTABILIDAD ===
+        "concurrent_fragment_downloads": 1,  # Sin concurrencia (evita ConnectionTerminated)
         "retries": 10,
         "fragment_retries": 10,
-        "http_chunk_size": 10485760,
-        # === FIX CONEXIÓN HTTP/2 ===
+        # === FIX HTTP/2 ===
         "legacy_server_connect": True,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
         "extractor_args": {
-            "youtube": {
-                "player_client": "ios,web",  # iOS primero, luego web
-                "skip": "hls,dash",  # Evitar streams fragmentados problemáticos
-            },
+            "youtube": {"player_client": "web"},
             "vimeo": {"http_version": "1.1"},
         },
     }
@@ -114,7 +112,7 @@ def download_and_extract(
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
-        # === FORMATO OPTIMIZADO ===
+        # === FORMATO ===
         "format": "worstvideo+bestaudio/bestaudio/worst",
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
