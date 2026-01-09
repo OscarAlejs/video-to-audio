@@ -36,18 +36,25 @@ def format_file_size(bytes_size: int) -> str:
 
 
 def get_base_ydl_opts() -> dict:
-    """Opciones base con anti-throttling"""
+    """Opciones base con anti-throttling y fixes de conexión"""
     opts = {
         "quiet": True,
         "no_warnings": True,
         # === OPTIMIZACIÓN DE VELOCIDAD ===
-        "concurrent_fragment_downloads": 4,  # Descargar 4 fragmentos simultáneos
-        "throttled_rate": 100000,  # Si < 100KB/s, re-extraer URL (anti-throttle)
-        "retries": 10,  # Reintentos si falla
-        "fragment_retries": 10,  # Reintentos por fragmento
-        "http_chunk_size": 10485760,  # Chunks de 10MB
-        # === FIX VIMEO HTTP/2 ===
-        "extractor_args": {"vimeo": {"http_version": "1.1"}},
+        "concurrent_fragment_downloads": 4,
+        "throttled_rate": 100000,
+        "retries": 10,
+        "fragment_retries": 10,
+        "http_chunk_size": 10485760,
+        # === FIX CONEXIÓN HTTP/2 ===
+        "legacy_server_connect": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": "ios,web",  # iOS primero, luego web
+                "skip": "hls,dash",  # Evitar streams fragmentados problemáticos
+            },
+            "vimeo": {"http_version": "1.1"},
+        },
     }
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
@@ -108,10 +115,6 @@ def download_and_extract(
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
         # === FORMATO OPTIMIZADO ===
-        # Prioridad: peor video + mejor audio (descarga rápida, audio de calidad)
-        # 1. worstvideo+bestaudio = video 144p + mejor audio (~150-300MB/hora)
-        # 2. bestaudio = solo audio si disponible (~50-100MB/hora)
-        # 3. worst = última opción
         "format": "worstvideo+bestaudio/bestaudio/worst",
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
