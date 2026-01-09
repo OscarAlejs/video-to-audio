@@ -46,6 +46,8 @@ def get_base_ydl_opts() -> dict:
         "retries": 10,  # Reintentos si falla
         "fragment_retries": 10,  # Reintentos por fragmento
         "http_chunk_size": 10485760,  # Chunks de 10MB
+        # === FIX VIMEO HTTP/2 ===
+        "extractor_args": {"vimeo": {"http_version": "1.1"}},
     }
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
