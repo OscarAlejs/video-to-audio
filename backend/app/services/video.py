@@ -98,9 +98,13 @@ def download_and_extract(
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
-        # CLAVE: Descargar SOLO audio, no video
-        "format": "bestaudio/best",
-        "extract_audio": True,
+        # OPTIMIZADO: Descargar peor video + mejor audio
+        # Esto es MUCHO más rápido que descargar el video completo en alta calidad
+        # Prioridad:
+        # 1. worstvideo+bestaudio = video 144p/240p + mejor audio (~150-300MB)
+        # 2. bestaudio = solo audio si está disponible (~50-100MB)
+        # 3. worst = última opción, peor calidad combinada
+        "format": "worstvideo+bestaudio/bestaudio/worst",
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": output_format.value,
