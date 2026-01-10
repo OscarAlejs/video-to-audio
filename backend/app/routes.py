@@ -382,12 +382,35 @@ async def upload_video_file(
         suffix = Path(file.filename).suffix
         temp_video_path = Path(tempfile.mktemp(suffix=suffix))
         
-        with open(temp_video_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+        # Guardar archivo usando streaming para archivos grandes
+        with open(temp_video_path, "wb") as temp_file:
+            # Leer en chunks de 8MB para evitar problemas de memoria y timeouts
+            while True:
+                chunk = await file.read(8 * 1024 * 1024)  # 8MB chunks
+                if not chunk:
+                    break
+                temp_file.write(chunk)
         
         video_size = temp_video_path.stat().st_size
         video_size_formatted = upload.format_file_size(video_size)
+        
+        # Validar tamaño del archivo
+        settings = get_settings()
+        max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+        if video_size > max_size_bytes:
+            upload.cleanup_file(temp_video_path)
+            db.update_job(
+                job_id,
+                status="failed",
+                error_code="FILE_TOO_LARGE",
+                error_message=f"Archivo muy grande ({video_size_formatted}). Máximo: {settings.max_file_size_mb}MB"
+            )
+            return UploadResponse(
+                status="error",
+                error_code="FILE_TOO_LARGE",
+                message=f"Archivo muy grande ({video_size_formatted}). Máximo permitido: {settings.max_file_size_mb}MB",
+                processing_time=round(time.time() - start_time, 2),
+            )
         
         # Obtener duración
         duration = upload.get_video_duration(temp_video_path)
@@ -515,13 +538,30 @@ async def upload_and_download(
     audio_file = None
     
     try:
-        # 1. Guardar archivo temporal
+        # 1. Guardar archivo temporal usando streaming
         suffix = Path(file.filename).suffix
         temp_video_path = Path(tempfile.mktemp(suffix=suffix))
         
-        with open(temp_video_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+        # Guardar archivo usando streaming para archivos grandes
+        with open(temp_video_path, "wb") as temp_file:
+            # Leer en chunks de 8MB para evitar problemas de memoria y timeouts
+            while True:
+                chunk = await file.read(8 * 1024 * 1024)  # 8MB chunks
+                if not chunk:
+                    break
+                temp_file.write(chunk)
+        
+        # Validar tamaño del archivo
+        settings = get_settings()
+        video_size = temp_video_path.stat().st_size
+        max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+        if video_size > max_size_bytes:
+            upload.cleanup_file(temp_video_path)
+            video_size_formatted = upload.format_file_size(video_size)
+            raise HTTPException(
+                status_code=413,
+                detail=f"Archivo muy grande ({video_size_formatted}). Máximo permitido: {settings.max_file_size_mb}MB"
+            )
         
         # 2. Extraer audio
         audio_file = await asyncio.to_thread(

@@ -32,7 +32,7 @@ stderr_logfile=/dev/stderr\n\
 stderr_logfile_maxbytes=0\n\
 \n\
 [program:uvicorn]\n\
-command=uvicorn app.main:app --host 127.0.0.1 --port 8001 --timeout-keep-alive 600\n\
+command=uvicorn app.main:app --host 127.0.0.1 --port 8001 --timeout-keep-alive 600 --timeout-graceful-shutdown 600\n\
 autostart=true\n\
 autorestart=true\n\
 stdout_logfile=/dev/stdout\n\

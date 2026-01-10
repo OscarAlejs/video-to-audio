@@ -57,10 +57,10 @@ export function FileUpload({ onUpload, isLoading = false, disabled = false }: Fi
       return false;
     }
     
-    // Validar tamaño (max 500MB)
-    const maxSize = 500 * 1024 * 1024;
+    // Validar tamaño (max 1GB = 1024MB)
+    const maxSize = 1024 * 1024 * 1024; // 1GB
     if (f.size > maxSize) {
-      setError('Archivo muy grande. Máximo: 500MB');
+      setError('Archivo muy grande. Máximo: 1GB (1024MB)');
       return false;
     }
     

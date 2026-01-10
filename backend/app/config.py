@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # Limits
     max_duration_minutes: int = 60
-    max_file_size_mb: int = 500
+    max_file_size_mb: int = 1024  # 1GB = 1024MB
     
     # CORS
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
