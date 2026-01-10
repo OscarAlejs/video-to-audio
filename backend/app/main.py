@@ -51,7 +51,23 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
+      # ✅ AÑADE AQUÍ EL NUEVO MIDDLEWARE DE TIMEOUT
+    @app.middleware("http")
+    async def timeout_middleware(request: Request, call_next):
+        try:
+            start_time = time.time()
+            # Establece el tiempo límite en segundos. Ejemplo: 600s = 10 minutos
+            TIMEOUT_LIMIT = 600
+            return await asyncio.wait_for(call_next(request), timeout=TIMEOUT_LIMIT)
+        except asyncio.TimeoutError:
+            process_time = time.time() - start_time
+            return JSONResponse(
+                {
+                    'detail': f'La petición excedió el límite de {TIMEOUT_LIMIT} segundos.',
+                    'processing_time': process_time
+                },
+                status_code=HTTP_504_GATEWAY_TIMEOUT
+            )  
     # Rutas
     app.include_router(router, prefix="/api")
     
