@@ -1,6 +1,2 @@
-"""
-Servicios de la aplicación
-"""
-from . import video, storage, jobs, db, upload
-
-__all__ = ["video", "storage", "jobs", "db", "upload"]
+# Video to Audio API
+__version__ = "1.0.0"
