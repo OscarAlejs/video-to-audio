@@ -2,12 +2,15 @@
 Video to Audio API
 Microservicio para extraer audio de videos de YouTube/Vimeo
 """
+import asyncio
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import Request  # ¡Esta es la importación crucial!
+from fastapi.responses import JSONResponse
+from starlette.status import HTTP_504_GATEWAY_TIMEOUT
 
 from .config import get_settings
 from .routes import router
@@ -52,12 +55,13 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-      # ✅ AÑADE AQUÍ EL NUEVO MIDDLEWARE DE TIMEOUT
+    
+    # Middleware de timeout para peticiones largas
     @app.middleware("http")
     async def timeout_middleware(request: Request, call_next):
         try:
             start_time = time.time()
-            # Establece el tiempo límite en segundos. Ejemplo: 600s = 10 minutos
+            # Tiempo límite en segundos (600 = 10 minutos)
             TIMEOUT_LIMIT = 600
             return await asyncio.wait_for(call_next(request), timeout=TIMEOUT_LIMIT)
         except asyncio.TimeoutError:
@@ -68,7 +72,8 @@ def create_app() -> FastAPI:
                     'processing_time': process_time
                 },
                 status_code=HTTP_504_GATEWAY_TIMEOUT
-            )  
+            )
+    
     # Rutas
     app.include_router(router, prefix="/api")
     
