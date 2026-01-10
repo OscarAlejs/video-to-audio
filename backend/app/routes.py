@@ -333,6 +333,9 @@ async def upload_video_file(
     - **file**: Archivo de video (mp4, mkv, webm, avi, mov, etc.)
     - **format**: Formato de salida (mp3, m4a, wav, opus)
     - **quality**: Calidad en kbps (128, 192, 256, 320)
+    
+    Nota: Este endpoint procesa el archivo de forma síncrona y puede tardar varios minutos.
+    Para archivos grandes, considera usar el endpoint asíncrono /extract.
     """
     start_time = time.time()
     

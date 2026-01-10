@@ -55,17 +55,32 @@ export const api = {
     formData.append('format', format);
     formData.append('quality', quality);
 
-    const response = await fetch(`${API_BASE}/upload`, {
-      method: 'POST',
-      body: formData,
-      // No Content-Type header - browser sets it with boundary for FormData
-    });
+    // Crear un AbortController con timeout de 15 minutos (900000ms) para archivos grandes
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 900000); // 15 minutos
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Error desconocido' }));
-      throw new Error(error.detail || `HTTP ${response.status}`);
+    try {
+      const response = await fetch(`${API_BASE}/upload`, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+        // No Content-Type header - browser sets it with boundary for FormData
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Error desconocido' }));
+        throw new Error(error.detail || `HTTP ${response.status}`);
+      }
+
+      return response.json();
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('La solicitud tardó demasiado tiempo. Intenta con un archivo más pequeño o verifica tu conexión.');
+      }
+      throw error;
     }
-
-    return response.json();
   },
 };
