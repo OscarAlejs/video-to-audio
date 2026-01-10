@@ -124,6 +124,25 @@ class ProcessResponse(BaseModel):
     message: Optional[str] = None
 
 
+class UploadResponse(BaseModel):
+    """Respuesta del endpoint /upload"""
+    status: str  # "success" o "error"
+    audio_url: Optional[str] = None
+    filename: Optional[str] = None
+    file_size: Optional[int] = None
+    file_size_formatted: Optional[str] = None
+    original_size: Optional[int] = None
+    original_size_formatted: Optional[str] = None
+    duration: Optional[int] = None
+    duration_formatted: Optional[str] = None
+    format: Optional[str] = None
+    quality: Optional[str] = None
+    processing_time: Optional[float] = None
+    job_id: Optional[str] = None
+    error_code: Optional[str] = None
+    message: Optional[str] = None
+
+
 # ============== Execution Logs ==============
 
 class ExecutionSource(str, Enum):
