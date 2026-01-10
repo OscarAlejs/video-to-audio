@@ -2,13 +2,13 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { api } from '../services/api';
-import type { AudioFormat, AudioQuality, Job, VideoInfo } from '../types';
+import type { AudioFormat, AudioQuality, JobResponse, VideoInfo } from '../types';
 
 const STORAGE_KEY = 'video-to-audio-current-job';
 
 interface UseExtractOptions {
   pollingInterval?: number;
-  onComplete?: (job: Job) => void;
+  onComplete?: (job: JobResponse) => void;
   onError?: (error: Error) => void;
 }
 
@@ -17,7 +17,7 @@ export function useExtract(options: UseExtractOptions = {}) {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
-  const [job, setJob] = useState<Job | null>(null);
+  const [job, setJob] = useState<JobResponse | null>(null);
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -167,7 +167,7 @@ export function useExtract(options: UseExtractOptions = {}) {
     setJob(null);
 
     try {
-      const newJob = await api.startExtraction({ url, format, quality });
+      const newJob = await api.startExtraction(url, format, quality);
       setJob(newJob);
       
       // Guardar en localStorage
