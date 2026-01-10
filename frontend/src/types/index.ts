@@ -1,18 +1,17 @@
-// Tipos compartidos del frontend
+// Tipos compartidos
 
 export type AudioFormat = 'mp3' | 'm4a' | 'wav' | 'opus';
 export type AudioQuality = '128' | '192' | '256' | '320';
 export type JobStatus = 'pending' | 'processing' | 'downloading' | 'extracting' | 'uploading' | 'completed' | 'failed';
-export type ExecutionSource = 'api' | 'web';
 
 export interface VideoInfo {
   id: string;
   title: string;
   duration_seconds: number;
   duration_formatted: string;
-  thumbnail: string | null;
+  thumbnail?: string;
   source: string;
-  channel: string | null;
+  channel?: string;
 }
 
 export interface ExtractResult {
@@ -25,7 +24,7 @@ export interface ExtractResult {
   error?: string;
 }
 
-export interface Job {
+export interface JobResponse {
   job_id: string;
   status: JobStatus;
   progress: number;
@@ -35,12 +34,6 @@ export interface Job {
   result?: ExtractResult;
 }
 
-export interface ExtractRequest {
-  url: string;
-  format: AudioFormat;
-  quality: AudioQuality;
-}
-
 export interface HealthStatus {
   status: string;
   version: string;
@@ -48,14 +41,6 @@ export interface HealthStatus {
   max_duration_minutes: number;
 }
 
-export interface Stats {
-  total_jobs: number;
-  completed_jobs: number;
-  failed_jobs: number;
-  active_jobs: number;
-}
-
-// Job desde Supabase (tabla jobs)
 export interface JobLog {
   id: string;
   status: string;
@@ -63,26 +48,17 @@ export interface JobLog {
   stage: string;
   video_url: string;
   video_title?: string;
-  video_id?: string;
   video_duration?: number;
-  video_thumbnail?: string;
-  video_source?: string;
-  video_channel?: string;
-  format: string;
-  quality: string;
+  format?: string;
+  quality?: string;
   audio_url?: string;
   file_size?: string;
+  processing_time?: number;
   error_code?: string;
   error_message?: string;
-  processing_time?: number;
-  source: ExecutionSource;
+  source: string;
   created_at: string;
-  updated_at: string;
-}
-
-export interface LogsResponse {
-  total: number;
-  logs: JobLog[];
+  updated_at?: string;
 }
 
 export interface LogsStats {
@@ -93,4 +69,22 @@ export interface LogsStats {
   failed: number;
   api_total: number;
   web_total: number;
+}
+
+export interface UploadResponse {
+  status: string;
+  audio_url?: string;
+  filename?: string;
+  file_size?: number;
+  file_size_formatted?: string;
+  original_size?: number;
+  original_size_formatted?: string;
+  duration?: number;
+  duration_formatted?: string;
+  format?: string;
+  quality?: string;
+  processing_time?: number;
+  job_id?: string;
+  error_code?: string;
+  message?: string;
 }

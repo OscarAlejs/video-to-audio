@@ -4,3 +4,4 @@ export { ProgressBar } from './ProgressBar';
 export { ResultCard } from './ResultCard';
 export { VideoPreview } from './VideoPreview';
 export { LogsPanel } from './LogsPanel';
+export { FileUpload } from './FileUpload';

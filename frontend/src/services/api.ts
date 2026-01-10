@@ -1,90 +1,71 @@
-// API Service para comunicación con el backend
+// API Client
 
-import type { ExtractRequest, HealthStatus, Job, LogsResponse, LogsStats, Stats, VideoInfo } from '../types';
+import type { VideoInfo, JobResponse, HealthStatus, AudioFormat, AudioQuality, JobLog, LogsStats, UploadResponse } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://videoconverter-api.8r3zyw.easypanel.host/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
-class ApiError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
+async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
 
-async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Error desconocido' }));
-    throw new ApiError(response.status, error.detail || 'Error en la solicitud');
+    throw new Error(error.detail || `HTTP ${response.status}`);
   }
+
   return response.json();
 }
 
 export const api = {
-  async health(): Promise<HealthStatus> {
-    const response = await fetch(`${API_URL}/health`);
-    return handleResponse<HealthStatus>(response);
-  },
+  // Health
+  health: () => request<HealthStatus>('/health'),
 
-  async getVideoInfo(url: string): Promise<VideoInfo> {
-    const response = await fetch(`${API_URL}/info?url=${encodeURIComponent(url)}`);
-    return handleResponse<VideoInfo>(response);
-  },
+  // Video Info
+  getVideoInfo: (url: string) => 
+    request<VideoInfo>(`/info?url=${encodeURIComponent(url)}`),
 
-  async startExtraction(request: ExtractRequest): Promise<Job> {
-    const response = await fetch(`${API_URL}/extract`, {
+  // Extract (async)
+  startExtraction: (url: string, format: AudioFormat, quality: AudioQuality) =>
+    request<JobResponse>('/extract', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
+      body: JSON.stringify({ url, format, quality }),
+    }),
+
+  // Jobs
+  getJob: (jobId: string) => request<JobResponse>(`/jobs/${jobId}`),
+  getJobs: () => request<JobResponse[]>('/jobs'),
+  deleteJob: (jobId: string) => request<void>(`/jobs/${jobId}`, { method: 'DELETE' }),
+
+  // Logs
+  getAllLogs: (limit = 50) => request<{ total: number; logs: JobLog[] }>(`/logs?limit=${limit}`),
+  getApiLogs: (limit = 50) => request<{ total: number; logs: JobLog[] }>(`/logs/api?limit=${limit}`),
+  getWebLogs: (limit = 50) => request<{ total: number; logs: JobLog[] }>(`/logs/web?limit=${limit}`),
+  getErrorLogs: (limit = 50) => request<{ total: number; logs: JobLog[] }>(`/logs/errors?limit=${limit}`),
+  getLogsStats: () => request<LogsStats>('/logs/stats'),
+
+  // Upload - envía archivo de video
+  uploadVideo: async (file: File, format: AudioFormat, quality: AudioQuality): Promise<UploadResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('format', format);
+    formData.append('quality', quality);
+
+    const response = await fetch(`${API_BASE}/upload`, {
+      method: 'POST',
+      body: formData,
+      // No Content-Type header - browser sets it with boundary for FormData
     });
-    return handleResponse<Job>(response);
-  },
 
-  async getJob(jobId: string): Promise<Job> {
-    const response = await fetch(`${API_URL}/jobs/${jobId}`);
-    return handleResponse<Job>(response);
-  },
-
-  async listJobs(): Promise<Job[]> {
-    const response = await fetch(`${API_URL}/jobs`);
-    return handleResponse<Job[]>(response);
-  },
-
-  async getStats(): Promise<Stats> {
-    const response = await fetch(`${API_URL}/jobs/stats`);
-    return handleResponse<Stats>(response);
-  },
-
-  async deleteJob(jobId: string): Promise<void> {
-    const response = await fetch(`${API_URL}/jobs/${jobId}`, { method: 'DELETE' });
     if (!response.ok) {
-      throw new ApiError(response.status, 'Error al eliminar job');
+      const error = await response.json().catch(() => ({ detail: 'Error desconocido' }));
+      throw new Error(error.detail || `HTTP ${response.status}`);
     }
-  },
 
-  async getAllLogs(limit: number = 50): Promise<LogsResponse> {
-    const response = await fetch(`${API_URL}/logs?limit=${limit}`);
-    return handleResponse<LogsResponse>(response);
-  },
-
-  async getApiLogs(limit: number = 50): Promise<LogsResponse> {
-    const response = await fetch(`${API_URL}/logs/api?limit=${limit}`);
-    return handleResponse<LogsResponse>(response);
-  },
-
-  async getWebLogs(limit: number = 50): Promise<LogsResponse> {
-    const response = await fetch(`${API_URL}/logs/web?limit=${limit}`);
-    return handleResponse<LogsResponse>(response);
-  },
-
-  async getErrorLogs(limit: number = 50): Promise<LogsResponse> {
-    const response = await fetch(`${API_URL}/logs/errors?limit=${limit}`);
-    return handleResponse<LogsResponse>(response);
-  },
-
-  async getLogsStats(): Promise<LogsStats> {
-    const response = await fetch(`${API_URL}/logs/stats`);
-    return handleResponse<LogsStats>(response);
+    return response.json();
   },
 };
-
-export { ApiError };
