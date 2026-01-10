@@ -56,13 +56,25 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     
-    # Middleware de timeout para peticiones largas
+    # Middleware de timeout para peticiones largas (EXCEPTO uploads)
     @app.middleware("http")
-    async def timeout_middleware(request: Request, call_next):
+    async def timeout_middleware(request:  Request, call_next):
+        # Excluir rutas de upload del timeout global
+        EXCLUDED_PATHS = [
+            "/api/upload",
+            "/api/upload/download", 
+            "/api/upload/extract",
+            "/api/upload/streaming",  # Nueva ruta sin timeout
+        ]
+        
+        # Si la ruta está excluida, no aplicar timeout
+        if any(request.url.path. startswith(path) for path in EXCLUDED_PATHS):
+            return await call_next(request)
+        
+        # Para otras rutas, aplicar timeout de 10 minutos
         try:
             start_time = time.time()
-            # Tiempo límite en segundos (600 = 10 minutos)
-            TIMEOUT_LIMIT = 600
+            TIMEOUT_LIMIT = 600  # 10 minutos
             return await asyncio.wait_for(call_next(request), timeout=TIMEOUT_LIMIT)
         except asyncio.TimeoutError:
             process_time = time.time() - start_time
