@@ -4,7 +4,9 @@ Rutas de la API
 import os
 import time
 import asyncio
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+import tempfile
+from pathlib import Path
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 
 from .config import get_settings
@@ -16,8 +18,11 @@ from .models import (
     ProcessResponse,
     StatsResponse,
     VideoInfo,
+    AudioFormat,
+    AudioQuality,
+    UploadResponse,
 )
-from .services import jobs, storage, video, db
+from .services import jobs, storage, video, db, upload
 from . import __version__
 
 
@@ -310,6 +315,269 @@ async def process_and_download(request: ProcessRequest):
             error_message=str(e),
             processing_time=processing_time,
         )
+        
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============== File Upload ==============
+
+@router.post("/upload", response_model=UploadResponse)
+async def upload_video_file(
+    file: UploadFile = File(...),
+    format: str = Form("mp3"),
+    quality: str = Form("192"),
+):
+    """
+    **Upload de archivo** - Sube un archivo de video y extrae el audio.
+    
+    - **file**: Archivo de video (mp4, mkv, webm, avi, mov, etc.)
+    - **format**: Formato de salida (mp3, m4a, wav, opus)
+    - **quality**: Calidad en kbps (128, 192, 256, 320)
+    """
+    start_time = time.time()
+    
+    if not storage.is_configured():
+        return UploadResponse(
+            status="error",
+            error_code="SUPABASE_NOT_CONFIGURED",
+            message="Supabase no está configurado"
+        )
+    
+    # Validar formato de archivo
+    if not file.filename or not upload.is_valid_video_file(file.filename):
+        return UploadResponse(
+            status="error",
+            error_code="INVALID_FILE_FORMAT",
+            message="Formato de archivo no soportado. Usa: mp4, mkv, webm, avi, mov, flv, wmv"
+        )
+    
+    # Validar parámetros
+    try:
+        audio_format = AudioFormat(format.lower())
+    except ValueError:
+        audio_format = AudioFormat.MP3
+    
+    try:
+        audio_quality = AudioQuality(quality)
+    except ValueError:
+        audio_quality = AudioQuality.MEDIUM
+    
+    # Crear job
+    job_data = db.create_job(
+        video_url=f"upload://{file.filename}",
+        format=audio_format.value,
+        quality=audio_quality.value,
+        source="upload"
+    )
+    job_id = job_data["id"]
+    
+    temp_video_path = None
+    audio_file = None
+    
+    try:
+        # 1. Guardar archivo temporal
+        db.update_job(job_id, status="processing", progress=10, stage="Recibiendo archivo...")
+        
+        # Crear archivo temporal
+        suffix = Path(file.filename).suffix
+        temp_video_path = Path(tempfile.mktemp(suffix=suffix))
+        
+        with open(temp_video_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        video_size = temp_video_path.stat().st_size
+        video_size_formatted = upload.format_file_size(video_size)
+        
+        # Obtener duración
+        duration = upload.get_video_duration(temp_video_path)
+        duration_formatted = video.format_duration(duration) if duration else "Desconocida"
+        
+        db.update_job(
+            job_id,
+            video_title=file.filename,
+            video_duration=duration,
+        )
+        
+        # 2. Extraer audio
+        db.update_job(job_id, status="extracting", progress=40, stage="Extrayendo audio...")
+        
+        audio_file = await asyncio.to_thread(
+            upload.extract_audio_from_file,
+            temp_video_path,
+            audio_format,
+            audio_quality,
+        )
+        
+        # 3. Subir a Supabase
+        db.update_job(job_id, status="uploading", progress=80, stage="Subiendo...")
+        
+        audio_url = await asyncio.to_thread(storage.upload_file, audio_file)
+        
+        # 4. Obtener info del audio
+        file_size = audio_file.stat().st_size
+        file_size_formatted = upload.format_file_size(file_size)
+        
+        # 5. Limpiar archivos temporales
+        upload.cleanup_file(temp_video_path)
+        upload.cleanup_file(audio_file)
+        
+        # 6. Calcular tiempo
+        processing_time = round(time.time() - start_time, 2)
+        
+        # 7. Actualizar job
+        db.update_job(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="Completado",
+            audio_url=audio_url,
+            file_size=file_size_formatted,
+            processing_time=processing_time,
+        )
+        
+        return UploadResponse(
+            status="success",
+            audio_url=audio_url,
+            filename=file.filename,
+            file_size=file_size,
+            file_size_formatted=file_size_formatted,
+            original_size=video_size,
+            original_size_formatted=video_size_formatted,
+            duration=duration,
+            duration_formatted=duration_formatted,
+            format=audio_format.value,
+            quality=audio_quality.value,
+            processing_time=processing_time,
+            job_id=job_id,
+            message="Audio extraído exitosamente",
+        )
+        
+    except Exception as e:
+        processing_time = round(time.time() - start_time, 2)
+        
+        # Limpiar archivos temporales
+        if temp_video_path:
+            upload.cleanup_file(temp_video_path)
+        if audio_file:
+            upload.cleanup_file(audio_file)
+        
+        db.update_job(
+            job_id,
+            status="failed",
+            error_code="EXTRACTION_FAILED",
+            error_message=str(e),
+            processing_time=processing_time,
+        )
+        
+        return UploadResponse(
+            status="error",
+            error_code="EXTRACTION_FAILED",
+            message=str(e),
+            processing_time=processing_time,
+        )
+
+
+@router.post("/upload/download")
+async def upload_and_download(
+    file: UploadFile = File(...),
+    format: str = Form("mp3"),
+    quality: str = Form("192"),
+):
+    """
+    **Upload + Download directo** - Sube un video y devuelve el audio directamente.
+    Ideal para n8n y automatizaciones que necesitan el binario.
+    """
+    start_time = time.time()
+    
+    if not storage.is_configured():
+        raise HTTPException(status_code=503, detail="Supabase no configurado")
+    
+    # Validar formato de archivo
+    if not file.filename or not upload.is_valid_video_file(file.filename):
+        raise HTTPException(
+            status_code=400,
+            detail="Formato de archivo no soportado. Usa: mp4, mkv, webm, avi, mov, flv, wmv"
+        )
+    
+    # Validar parámetros
+    try:
+        audio_format = AudioFormat(format.lower())
+    except ValueError:
+        audio_format = AudioFormat.MP3
+    
+    try:
+        audio_quality = AudioQuality(quality)
+    except ValueError:
+        audio_quality = AudioQuality.MEDIUM
+    
+    temp_video_path = None
+    audio_file = None
+    
+    try:
+        # 1. Guardar archivo temporal
+        suffix = Path(file.filename).suffix
+        temp_video_path = Path(tempfile.mktemp(suffix=suffix))
+        
+        with open(temp_video_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        # 2. Extraer audio
+        audio_file = await asyncio.to_thread(
+            upload.extract_audio_from_file,
+            temp_video_path,
+            audio_format,
+            audio_quality,
+        )
+        
+        # 3. Leer audio en memoria
+        with open(audio_file, "rb") as f:
+            audio_data = f.read()
+        
+        file_size = len(audio_data)
+        file_size_formatted = upload.format_file_size(file_size)
+        filename = f"{Path(file.filename).stem}.{audio_format.value}"
+        
+        # 4. Subir a Supabase (backup)
+        audio_url = await asyncio.to_thread(storage.upload_file, audio_file)
+        
+        # 5. Limpiar archivos temporales
+        upload.cleanup_file(temp_video_path)
+        upload.cleanup_file(audio_file)
+        
+        # 6. Calcular tiempo
+        processing_time = round(time.time() - start_time, 2)
+        
+        # 7. Determinar content type
+        content_types = {
+            "mp3": "audio/mpeg",
+            "m4a": "audio/mp4",
+            "wav": "audio/wav",
+            "opus": "audio/opus"
+        }
+        content_type = content_types.get(audio_format.value, "audio/mpeg")
+        
+        # 8. Devolver archivo directamente
+        return StreamingResponse(
+            iter([audio_data]),
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(file_size),
+                "X-Audio-URL": audio_url,
+                "X-Original-Filename": file.filename,
+                "X-Processing-Time": str(processing_time),
+                "X-File-Size": file_size_formatted,
+            }
+        )
+        
+    except Exception as e:
+        # Limpiar archivos temporales
+        if temp_video_path:
+            upload.cleanup_file(temp_video_path)
+        if audio_file:
+            upload.cleanup_file(audio_file)
         
         raise HTTPException(status_code=500, detail=str(e))
 
