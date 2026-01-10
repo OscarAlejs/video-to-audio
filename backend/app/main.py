@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Request  # ¡Esta es la importación crucial!
 
 from .config import get_settings
 from .routes import router
