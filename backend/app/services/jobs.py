@@ -5,6 +5,8 @@ import asyncio
 import time
 from datetime import datetime
 
+from pathlib import Path
+
 from ..models import (
     AudioFormat,
     AudioQuality,
@@ -14,7 +16,7 @@ from ..models import (
     JobStatus,
     VideoInfo,
 )
-from . import video, storage, db
+from . import video, storage, db, upload
 
 
 def create_job(video_url: str, format: str, quality: str, source: str = "web") -> JobResponse:
@@ -188,6 +190,119 @@ async def process_job(job_id: str, request: ExtractRequest) -> None:
             progress=0,
             stage="Error",
             error_code="EXTRACTION_FAILED",
+            error_message=str(e),
+            processing_time=processing_time,
+        )
+
+
+async def process_upload_job(
+    job_id: str,
+    video_file_path: Path,
+    filename: str,
+    audio_format: AudioFormat,
+    audio_quality: AudioQuality,
+) -> None:
+    """
+    Procesa un job de upload de forma asíncrona
+    Similar a process_job pero para archivos subidos
+    """
+    start_time = time.time()
+    temp_video_path = video_file_path
+    audio_file = None
+    
+    try:
+        # 1. Validar archivo
+        update_job(job_id, status="processing", progress=5, stage="Validando archivo...")
+        
+        if not temp_video_path.exists():
+            raise FileNotFoundError("Archivo temporal no encontrado")
+        
+        # 2. Obtener información del video
+        update_job(job_id, status="processing", progress=10, stage="Analizando video...")
+        
+        duration = await asyncio.to_thread(upload.get_video_duration, temp_video_path)
+        duration_formatted = video.format_duration(duration) if duration else "Desconocida"
+        
+        video_size = temp_video_path.stat().st_size
+        video_size_formatted = upload.format_file_size(video_size)
+        
+        # Guardar info del video
+        update_job(
+            job_id,
+            progress=15,
+            video_title=filename,
+            video_duration=duration,
+        )
+        
+        # Validar duración
+        from ..config import get_settings
+        settings = get_settings()
+        if duration and duration > settings.max_duration_minutes * 60:
+            raise ValueError(
+                f"Video muy largo ({duration // 60} min). "
+                f"Máximo permitido: {settings.max_duration_minutes} min"
+            )
+        
+        # Validar tamaño
+        max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+        if video_size > max_size_bytes:
+            raise ValueError(
+                f"Archivo muy grande ({video_size_formatted}). "
+                f"Máximo permitido: {settings.max_file_size_mb}MB"
+            )
+        
+        # 3. Extraer audio
+        update_job(job_id, status="extracting", progress=20, stage="Extrayendo audio...")
+        
+        audio_file = await asyncio.to_thread(
+            upload.extract_audio_from_file,
+            temp_video_path,
+            audio_format,
+            audio_quality,
+        )
+        
+        # 4. Subir a Supabase
+        update_job(job_id, status="uploading", progress=85, stage="Subiendo a la nube...")
+        
+        audio_url = await asyncio.to_thread(storage.upload_file, audio_file)
+        
+        # 5. Obtener tamaño del archivo de audio
+        file_size = audio_file.stat().st_size
+        file_size_formatted = upload.format_file_size(file_size)
+        
+        # 6. Limpiar archivos temporales
+        upload.cleanup_file(temp_video_path)
+        upload.cleanup_file(audio_file)
+        
+        # 7. Calcular tiempo de procesamiento
+        processing_time = round(time.time() - start_time, 2)
+        
+        # 8. Completar job
+        update_job(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="¡Audio extraído exitosamente!",
+            audio_url=audio_url,
+            file_size=file_size_formatted,
+            processing_time=processing_time,
+        )
+        
+    except Exception as e:
+        processing_time = round(time.time() - start_time, 2)
+        
+        # Limpiar archivos temporales en caso de error
+        if temp_video_path and temp_video_path.exists():
+            upload.cleanup_file(temp_video_path)
+        if audio_file and audio_file.exists():
+            upload.cleanup_file(audio_file)
+        
+        update_job(
+            job_id,
+            status="failed",
+            progress=0,
+            stage="Error",
+            error_code="UPLOAD_EXTRACTION_FAILED",
             error_message=str(e),
             processing_time=processing_time,
         )

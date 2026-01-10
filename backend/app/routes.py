@@ -625,6 +625,136 @@ async def upload_and_download(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============== Upload (Async) ==============
+
+@router.post("/upload/extract", response_model=JobResponse)
+async def start_upload_extraction(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    format: str = Form("mp3"),
+    quality: str = Form("192"),
+):
+    """
+    **Upload asíncrono** - Sube un archivo de video y extrae el audio de forma asíncrona.
+    Retorna job_id para consultar el progreso mediante polling.
+    
+    Ideal para archivos grandes que pueden causar timeouts.
+    
+    - **file**: Archivo de video (mp4, mkv, webm, avi, mov, etc.)
+    - **format**: Formato de salida (mp3, m4a, wav, opus)
+    - **quality**: Calidad en kbps (128, 192, 256, 320)
+    
+    **Uso:**
+    1. Sube el archivo → obtienes job_id
+    2. Poll a `/api/jobs/{job_id}` para ver el progreso
+    3. Cuando status="completed", el audio_url estará disponible
+    """
+    if not storage.is_configured():
+        raise HTTPException(status_code=503, detail="Supabase no configurado")
+    
+    # Validar formato de archivo
+    if not file.filename or not upload.is_valid_video_file(file.filename):
+        raise HTTPException(
+            status_code=400,
+            detail="Formato de archivo no soportado. Usa: mp4, mkv, webm, avi, mov, flv, wmv"
+        )
+    
+    # Validar parámetros
+    try:
+        audio_format = AudioFormat(format.lower())
+    except ValueError:
+        audio_format = AudioFormat.MP3
+    
+    try:
+        audio_quality = AudioQuality(quality)
+    except ValueError:
+        audio_quality = AudioQuality.MEDIUM
+    
+    # Crear job primero
+    job = jobs.create_job(
+        video_url=f"upload://{file.filename}",
+        format=audio_format.value,
+        quality=audio_quality.value,
+        source="upload"
+    )
+    
+    temp_video_path = None
+    
+    try:
+        # 1. Guardar archivo temporal usando streaming
+        jobs.update_job(job.job_id, status="processing", progress=5, stage="Recibiendo archivo...")
+        
+        # Crear archivo temporal
+        suffix = Path(file.filename).suffix
+        temp_video_path = Path(tempfile.mktemp(suffix=suffix))
+        
+        # Guardar archivo usando streaming para archivos grandes
+        with open(temp_video_path, "wb") as temp_file:
+            # Leer en chunks de 8MB para evitar problemas de memoria y timeouts
+            while True:
+                chunk = await file.read(8 * 1024 * 1024)  # 8MB chunks
+                if not chunk:
+                    break
+                temp_file.write(chunk)
+        
+        video_size = temp_video_path.stat().st_size
+        video_size_formatted = upload.format_file_size(video_size)
+        
+        # Validar tamaño del archivo
+        settings = get_settings()
+        max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+        if video_size > max_size_bytes:
+            upload.cleanup_file(temp_video_path)
+            jobs.update_job(
+                job.job_id,
+                status="failed",
+                error_code="FILE_TOO_LARGE",
+                error_message=f"Archivo muy grande ({video_size_formatted}). Máximo: {settings.max_file_size_mb}MB"
+            )
+            raise HTTPException(
+                status_code=413,
+                detail=f"Archivo muy grande ({video_size_formatted}). Máximo permitido: {settings.max_file_size_mb}MB"
+            )
+        
+        # Actualizar job con info del archivo
+        jobs.update_job(
+            job.job_id,
+            progress=10,
+            video_title=file.filename,
+        )
+        
+        # 2. Iniciar procesamiento en background
+        background_tasks.add_task(
+            jobs.process_upload_job,
+            job.job_id,
+            temp_video_path,
+            file.filename,
+            audio_format,
+            audio_quality,
+        )
+        
+        # 3. Retornar job inmediatamente (el procesamiento continúa en background)
+        return job
+        
+    except HTTPException:
+        # Re-lanzar HTTPException
+        raise
+    except Exception as e:
+        # Limpiar archivo temporal si existe
+        if temp_video_path and temp_video_path.exists():
+            upload.cleanup_file(temp_video_path)
+        
+        # Marcar job como fallido
+        jobs.update_job(
+            job.job_id,
+            status="failed",
+            error_code="UPLOAD_FAILED",
+            error_message=str(e),
+        )
+        
+        raise HTTPException(status_code=500, detail=f"Error al procesar upload: {str(e)}")
+
+
 # ============== Extraction (Async) ==============
 
 @router.post("/extract", response_model=JobResponse)
