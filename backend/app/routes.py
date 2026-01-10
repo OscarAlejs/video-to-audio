@@ -682,6 +682,8 @@ async def start_upload_extraction(
     
     try:
         # 1. Guardar archivo temporal usando streaming
+        # NOTA: Esta operación puede tardar para archivos grandes, pero es necesaria
+        # Los timeouts de nginx deben ser lo suficientemente largos para permitir el upload
         jobs.update_job(job.job_id, status="processing", progress=5, stage="Recibiendo archivo...")
         
         # Crear archivo temporal
@@ -689,18 +691,27 @@ async def start_upload_extraction(
         temp_video_path = Path(tempfile.mktemp(suffix=suffix))
         
         # Guardar archivo usando streaming para archivos grandes
+        # Leer en chunks más pequeños para mejor progreso y evitar timeouts
+        chunk_size = 2 * 1024 * 1024  # 2MB chunks (más pequeños para mejor progreso)
+        total_written = 0
+        
         with open(temp_video_path, "wb") as temp_file:
-            # Leer en chunks de 8MB para evitar problemas de memoria y timeouts
             while True:
-                chunk = await file.read(8 * 1024 * 1024)  # 8MB chunks
+                chunk = await file.read(chunk_size)
                 if not chunk:
                     break
                 temp_file.write(chunk)
+                total_written += len(chunk)
+                
+                # Actualizar progreso cada 50MB recibidos
+                if total_written % (50 * 1024 * 1024) < chunk_size:
+                    progress = min(5 + int((total_written / (1024 * 1024 * 1024)) * 5), 10)  # 5-10%
+                    jobs.update_job(job.job_id, progress=progress, stage=f"Recibiendo archivo... ({upload.format_file_size(total_written)})")
         
         video_size = temp_video_path.stat().st_size
         video_size_formatted = upload.format_file_size(video_size)
         
-        # Validar tamaño del archivo
+        # Validación básica de tamaño (rápida) - validación completa en background
         settings = get_settings()
         max_size_bytes = settings.max_file_size_mb * 1024 * 1024
         if video_size > max_size_bytes:
@@ -716,14 +727,14 @@ async def start_upload_extraction(
                 detail=f"Archivo muy grande ({video_size_formatted}). Máximo permitido: {settings.max_file_size_mb}MB"
             )
         
-        # Actualizar job con info del archivo
+        # Actualizar job con info básica del archivo
         jobs.update_job(
             job.job_id,
             progress=10,
             video_title=file.filename,
         )
         
-        # 2. Iniciar procesamiento en background
+        # 2. Iniciar procesamiento en background (validaciones y procesamiento completo)
         background_tasks.add_task(
             jobs.process_upload_job,
             job.job_id,
@@ -733,7 +744,8 @@ async def start_upload_extraction(
             audio_quality,
         )
         
-        # 3. Retornar job inmediatamente (el procesamiento continúa en background)
+        # 3. Retornar job INMEDIATAMENTE después de recibir el archivo
+        # El procesamiento continúa en background
         return job
         
     except HTTPException:
