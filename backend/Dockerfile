@@ -15,7 +15,10 @@ RUN pip install --no-cache-dir --upgrade yt-dlp
 
 COPY app/ ./app/
 COPY cookies.tx[t] ./
-COPY nginx.conf /etc/nginx/sites-available/default
+# Copiar configuración de nginx a múltiples ubicaciones posibles
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+RUN rm -f /etc/nginx/conf.d/default.conf.bak 2>/dev/null || true
 
 # Supervisor config para correr nginx + uvicorn
 RUN echo '[supervisord]\n\
