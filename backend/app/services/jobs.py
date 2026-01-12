@@ -19,7 +19,7 @@ from ..models import (
 from . import video, storage, db, upload
 
 
-def create_job(video_url: str, format: str, quality: str, source: str = "web") -> JobResponse:
+def create_job(video_url:  str, format: str, quality: str, source: str = "web") -> JobResponse:
     """Crea un nuevo job en Supabase"""
     job_data = db.create_job(
         video_url=video_url,
@@ -30,10 +30,10 @@ def create_job(video_url: str, format: str, quality: str, source: str = "web") -
     
     return JobResponse(
         job_id=job_data["id"],
-        status=JobStatus.PENDING,
+        status=JobStatus. PENDING,
         progress=0,
-        message="Iniciando...",
-        created_at=datetime.fromisoformat(job_data["created_at"].replace("Z", "+00:00")) if isinstance(job_data["created_at"], str) else job_data["created_at"],
+        message="Iniciando.. .",
+        created_at=datetime.fromisoformat(job_data["created_at"]. replace("Z", "+00:00")) if isinstance(job_data["created_at"], str) else job_data["created_at"],
     )
 
 
@@ -41,25 +41,26 @@ def get_job(job_id: str) -> JobResponse | None:
     """Obtiene un job de Supabase"""
     job_data = db.get_job(job_id)
     
-    if not job_data:
+    if not job_data: 
         return None
     
-    # Construir video_info si existe
+    # ✅ CAMBIO:  Construir video_info solo si hay datos válidos
     video_info = None
-    if job_data.get("video_title"):
+    # Verificar que al menos tengamos id y source (campos requeridos antes)
+    if job_data.get("video_id") or job_data.get("video_title"):
         video_info = VideoInfo(
-            id=job_data.get("video_id", "unknown"),
-            title=job_data["video_title"],
-            duration_seconds=job_data.get("video_duration", 0),
-            duration_formatted=video.format_duration(job_data.get("video_duration", 0)),
+            id=job_data. get("video_id"),  # Puede ser None ahora
+            title=job_data.get("video_title"),
+            duration_seconds=job_data.get("video_duration"),
+            duration_formatted=video.format_duration(job_data.get("video_duration")) if job_data.get("video_duration") else None,
             thumbnail=job_data.get("video_thumbnail"),
-            source=job_data.get("video_source", "unknown"),
+            source=job_data.get("video_source"),  # Puede ser None ahora
             channel=job_data.get("video_channel"),
         )
     
     # Construir result si completado o fallido
     result = None
-    if job_data["status"] == "completed" and job_data.get("audio_url"):
+    if job_data["status"] == "completed" and job_data. get("audio_url"):
         result = ExtractResult(
             success=True,
             audio_url=job_data["audio_url"],
@@ -75,7 +76,7 @@ def get_job(job_id: str) -> JobResponse | None:
     
     created_at = job_data["created_at"]
     if isinstance(created_at, str):
-        created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        created_at = datetime.fromisoformat(created_at. replace("Z", "+00:00"))
     
     return JobResponse(
         job_id=job_data["id"],
@@ -83,7 +84,7 @@ def get_job(job_id: str) -> JobResponse | None:
         progress=job_data.get("progress", 0),
         message=job_data.get("stage", ""),
         created_at=created_at,
-        video_info=video_info,
+        video_info=video_info,  # Puede ser None ahora
         result=result,
     )
 
@@ -99,9 +100,24 @@ def delete_job(job_id: str) -> bool:
 
 
 def get_all_jobs(limit: int = 50) -> list[JobResponse]:
-    """Obtiene todos los jobs"""
+    """
+    Obtiene todos los jobs
+    ✅ CAMBIO:  Manejo de errores para jobs con datos incompletos
+    """
     jobs_data = db.list_jobs(limit=limit)
-    return [get_job(j["id"]) for j in jobs_data if get_job(j["id"])]
+    result = []
+    
+    for j in jobs_data:
+        try:
+            job = get_job(j["id"])
+            if job:
+                result.append(job)
+        except Exception as e:
+            # Log error pero continuar con los demás jobs
+            print(f"⚠️ Error al obtener job {j. get('id', 'unknown')}: {e}")
+            continue
+    
+    return result
 
 
 def get_stats() -> dict:
@@ -142,7 +158,7 @@ async def process_job(job_id: str, request: ExtractRequest) -> None:
         def on_progress(stage: str, percent: int):
             if stage == "downloading":
                 update_job(job_id, status="downloading", progress=10 + percent, stage="Descargando video...")
-            elif stage == "extracting":
+            elif stage == "extracting": 
                 update_job(job_id, status="extracting", progress=percent, stage="Extrayendo audio...")
         
         # 3. Descargar y extraer
@@ -162,10 +178,10 @@ async def process_job(job_id: str, request: ExtractRequest) -> None:
         audio_url = await asyncio.to_thread(storage.upload_file, audio_file)
         
         # 5. Obtener tamaño del archivo
-        file_size = video.format_file_size(audio_file.stat().st_size)
+        file_size = video. format_file_size(audio_file. stat().st_size)
         
         # 6. Limpiar archivo temporal
-        video.cleanup_file(audio_file)
+        video. cleanup_file(audio_file)
         
         # 7. Calcular tiempo de procesamiento
         processing_time = round(time.time() - start_time, 2)
@@ -288,7 +304,7 @@ async def process_upload_job(
             processing_time=processing_time,
         )
         
-    except Exception as e:
+    except Exception as e: 
         processing_time = round(time.time() - start_time, 2)
         
         # Limpiar archivos temporales en caso de error
