@@ -36,7 +36,7 @@ class JobStatus(str, Enum):
 class ExtractRequest(BaseModel):
     url: str
     format: AudioFormat = AudioFormat.MP3
-    quality: AudioQuality = AudioQuality.MEDIUM
+    quality: AudioQuality = AudioQuality. MEDIUM
     
     @field_validator("url")
     @classmethod
@@ -44,12 +44,12 @@ class ExtractRequest(BaseModel):
         supported = ["youtube.com", "youtu.be", "vimeo.com"]
         if not any(domain in v.lower() for domain in supported):
             raise ValueError("Solo se soportan URLs de YouTube o Vimeo")
-        return v.strip()
+        return v. strip()
 
 
 class ProcessRequest(BaseModel):
     """Request para el endpoint síncrono /process"""
-    video_url: str
+    video_url:  str
     format: AudioFormat = AudioFormat.MP3
     quality: AudioQuality = AudioQuality.MEDIUM
     
@@ -65,23 +65,23 @@ class ProcessRequest(BaseModel):
 # ============== Responses ==============
 
 class VideoInfo(BaseModel):
-    id: str
-    title: str
-    duration_seconds: int
-    duration_formatted: str
+    id: Optional[str] = None  # ✅ CAMBIO: Ahora es opcional
+    title: Optional[str] = None  # Ya era opcional
+    duration_seconds: Optional[int] = None  # Ya era opcional
+    duration_formatted:  Optional[str] = None  # Ya era opcional
     thumbnail: Optional[str] = None
-    source: str
-    channel: Optional[str] = None
+    source: Optional[str] = None  # ✅ CAMBIO:  Ahora es opcional
+    channel:  Optional[str] = None
 
 
 class JobResponse(BaseModel):
     job_id: str
     status: JobStatus
-    progress: int = 0  # 0-100
+    progress:  int = 0  # 0-100
     message: str = ""
-    created_at: datetime
+    created_at:  datetime
     video_info: Optional[VideoInfo] = None
-    result: Optional["ExtractResult"] = None
+    result:  Optional["ExtractResult"] = None
 
 
 class ExtractResult(BaseModel):
@@ -98,19 +98,19 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     supabase_configured: bool
-    max_duration_minutes: int
+    max_duration_minutes:  int
 
 
 class StatsResponse(BaseModel):
     total_jobs: int
     completed_jobs: int
     failed_jobs: int
-    active_jobs: int
+    active_jobs:  int
 
 
 class ProcessResponse(BaseModel):
     """Respuesta del endpoint síncrono /process"""
-    status: str  # "success" o "error"
+    status:  str  # "success" o "error"
     audio_url: Optional[str] = None
     video_info: Optional[VideoInfo] = None
     file_size: Optional[int] = None
@@ -152,13 +152,13 @@ class ExecutionSource(str, Enum):
 
 class ExecutionLog(BaseModel):
     """Log de una ejecución"""
-    id: str
+    id:  str
     source: ExecutionSource
     timestamp: datetime
     video_url: str
     video_title: Optional[str] = None
-    status: str  # "success" o "error"
-    audio_url: Optional[str] = None
+    status:  str  # "success" o "error"
+    audio_url:  Optional[str] = None
     file_size_formatted: Optional[str] = None
     duration_formatted: Optional[str] = None
     format: Optional[str] = None
