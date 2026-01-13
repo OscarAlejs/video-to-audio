@@ -38,21 +38,31 @@ def format_file_size(bytes_size: int) -> str:
 
 
 def get_base_ydl_opts() -> dict:
-    """Opciones base - estabilidad sobre velocidad"""
+    """Opciones optimizadas para evitar ConnectionTerminated"""
     opts = {
         "quiet": True,
         "no_warnings": True,
-        # === ESTABILIDAD ===
-        "concurrent_fragment_downloads": 1,  # Sin concurrencia (evita ConnectionTerminated)
-        "retries": 10,
-        "fragment_retries": 10,
-        # === FIX HTTP/2 ===
+        # === FIX ConnectionTerminated - FORZAR HTTP/1.1 ===
         "legacy_server_connect": True,
+        # === ESTABILIDAD MÁXIMA ===
+        "concurrent_fragment_downloads": 1,  # Un fragmento a la vez
+        "retries": 20,
+        "fragment_retries": 20,
+        "socket_timeout": 60,
+        "http_chunk_size": 10485760,  # 10MB chunks
+        # === HEADERS ===
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "*/*",
+            "Connection": "keep-alive",
         },
+        # === EXTRACTORS ===
         "extractor_args": {
-            "youtube": {"player_client": "web"},
+            "youtube": {
+                "player_client": "android",  # Android más estable que web
+                "skip": ["hls", "dash"],      # Evitar streaming fragmentado
+            },
             "vimeo": {"http_version": "1.1"},
         },
     }
@@ -274,8 +284,8 @@ def download_and_extract(
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
-        # === FORMATO ===
-        "format": "worstvideo+bestaudio/bestaudio/worst",
+        # === FORMATO: Solo audio para evitar fragmentos ===
+        "format": "bestaudio/best",
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": output_format.value,
