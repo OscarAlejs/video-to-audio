@@ -2,8 +2,10 @@
 Servicio de descarga y extracción de audio
 """
 import uuid
+import requests
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import urlparse
 
 import yt_dlp
 
@@ -59,7 +61,92 @@ def get_base_ydl_opts() -> dict:
     return opts
 
 
+def is_direct_file_url(url: str) -> bool:
+    """Detecta si es una URL directa de archivo"""
+    video_extensions = [".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".mpeg", ".mpg", ".3gp"]
+    
+    # Extensión en URL
+    if any(url.lower().endswith(ext) for ext in video_extensions):
+        return True
+    
+    # URLs de Supabase Storage
+    if "supabase.co/storage" in url.lower():
+        return True
+    
+    return False
+
+
+def download_direct_file(url: str, output_path: Path) -> Path:
+    """
+    Descarga un archivo directo desde una URL
+    """
+    print(f"📥 Descargando archivo directo: {url}")
+    
+    try:
+        response = requests.get(url, stream=True, timeout=30)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
+        
+        with open(output_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    if total_size > 0:
+                        progress = (downloaded / total_size) * 100
+                        if progress % 10 < 1:  # Log cada 10%
+                            print(f"   📥 Descarga: {progress:.0f}%")
+        
+        print(f"✅ Descarga completada: {output_path.name}")
+        return output_path
+        
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Error descargando archivo: {str(e)}")
+
+
+def get_video_duration_from_file(file_path: Path) -> Optional[int]:
+    """Obtiene duración de un archivo de video usando ffprobe"""
+    try:
+        import subprocess
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(file_path)
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return int(float(result.stdout.strip()))
+    except Exception:
+        pass
+    return None
+
+
 def get_video_info(url: str) -> VideoInfo:
+    """Obtiene información del video (YouTube/Vimeo o archivo directo)"""
+    
+    # Si es archivo directo, obtener info básica
+    if is_direct_file_url(url):
+        filename = urlparse(url).path.split('/')[-1]
+        return VideoInfo(
+            id="direct_file",
+            title=filename,
+            duration_seconds=0,  # Se obtendrá después de descargar
+            duration_formatted="Desconocida",
+            thumbnail=None,
+            source="direct_url",
+            channel=None,
+        )
+    
+    # YouTube/Vimeo (código existente)
     ydl_opts = {
         **get_base_ydl_opts(),
         "extract_flat": False,
@@ -88,6 +175,65 @@ def download_and_extract(
 ) -> tuple[Path, VideoInfo]:
     settings = get_settings()
     unique_id = str(uuid.uuid4())[:8]
+    
+    # Detectar si es archivo directo
+    if is_direct_file_url(url):
+        print(f"🔗 Procesando URL directa: {url}")
+        
+        # Descargar archivo
+        filename = urlparse(url).path.split('/')[-1] or f"video_{unique_id}.mp4"
+        temp_video = TEMP_DIR / f"{unique_id}_{filename}"
+        
+        if progress_callback:
+            progress_callback("downloading", 10)
+        
+        download_direct_file(url, temp_video)
+        
+        if progress_callback:
+            progress_callback("downloading", 50)
+        
+        # Obtener duración del archivo descargado
+        duration = get_video_duration_from_file(temp_video)
+        
+        # Validar duración
+        if duration and duration > settings.max_duration_minutes * 60:
+            cleanup_file(temp_video)
+            raise ValueError(
+                f"Video muy largo ({duration // 60} min). "
+                f"Máximo permitido: {settings.max_duration_minutes} min"
+            )
+        
+        # Extraer audio usando función del módulo upload
+        if progress_callback:
+            progress_callback("extracting", 60)
+        
+        from . import upload
+        audio_file = upload.extract_audio_from_file(
+            temp_video,
+            output_format,
+            quality
+        )
+        
+        if progress_callback:
+            progress_callback("extracting", 90)
+        
+        # Limpiar video temporal
+        cleanup_file(temp_video)
+        
+        # Crear VideoInfo
+        video_info = VideoInfo(
+            id="direct_file",
+            title=filename,
+            duration_seconds=duration or 0,
+            duration_formatted=format_duration(duration) if duration else "Desconocida",
+            thumbnail=None,
+            source="direct_url",
+            channel=None,
+        )
+        
+        return audio_file, video_info
+    
+    # YouTube/Vimeo (código existente)
     output_template = str(TEMP_DIR / f"{unique_id}_%(title).50s.%(ext)s")
     
     print(f"🎬 Descargando video de {url}")

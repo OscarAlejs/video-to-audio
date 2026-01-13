@@ -47,7 +47,15 @@ async def health_check():
 
 @router.get("/info", response_model=VideoInfo)
 async def get_video_info(url: str):
-    """Obtiene información de un video sin descargarlo"""
+    """
+    Obtiene información de un video sin descargarlo
+    
+    Soporta:
+    - YouTube: https://youtube.com/watch?v=...
+    - Vimeo: https://vimeo.com/...
+    - URLs directas: https://example.com/video.mp4
+    - Supabase Storage: https://[project].supabase.co/storage/v1/object/public/...
+    """
     try:
         info = video.get_video_info(url)
         return info
@@ -62,6 +70,11 @@ async def process_video(request: ProcessRequest):
     """
     **Modo API** - Procesa un video de forma síncrona.
     Guarda el job en Supabase para auditoría.
+    
+    Soporta:
+    - YouTube/Vimeo
+    - URLs directas de archivos de video (.mp4, .mkv, .webm, etc.)
+    - Supabase Storage
     """
     start_time = time.time()
     settings = get_settings()
@@ -779,7 +792,14 @@ async def start_upload_extraction(
 
 @router.post("/extract", response_model=JobResponse)
 async def start_extraction(request: ExtractRequest, background_tasks: BackgroundTasks):
-    """Inicia extracción asíncrona - retorna job_id para polling"""
+    """
+    Inicia extracción asíncrona - retorna job_id para polling
+    
+    Soporta:
+    - YouTube/Vimeo
+    - URLs directas de archivos de video (.mp4, .mkv, .webm, etc.)
+    - Supabase Storage
+    """
     if not storage.is_configured():
         raise HTTPException(status_code=503, detail="Supabase no configurado")
     

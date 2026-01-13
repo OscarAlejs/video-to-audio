@@ -36,30 +36,57 @@ class JobStatus(str, Enum):
 class ExtractRequest(BaseModel):
     url: str
     format: AudioFormat = AudioFormat.MP3
-    quality: AudioQuality = AudioQuality. MEDIUM
+    quality: AudioQuality = AudioQuality.MEDIUM
     
     @field_validator("url")
     @classmethod
     def validate_url(cls, v: str) -> str:
-        supported = ["youtube.com", "youtu.be", "vimeo.com"]
-        if not any(domain in v.lower() for domain in supported):
-            raise ValueError("Solo se soportan URLs de YouTube o Vimeo")
-        return v. strip()
+        v = v.strip()
+        
+        # Soportar YouTube/Vimeo
+        video_platforms = ["youtube.com", "youtu.be", "vimeo.com"]
+        if any(domain in v.lower() for domain in video_platforms):
+            return v
+        
+        # Soportar URLs directas de archivos de video
+        video_extensions = [".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".mpeg", ".mpg", ".3gp"]
+        if any(v.lower().endswith(ext) for ext in video_extensions):
+            return v
+        
+        # Soportar URLs de Supabase Storage (pueden no tener extensión visible)
+        if "supabase.co/storage" in v.lower():
+            return v
+        
+        raise ValueError("Solo se soportan URLs de YouTube, Vimeo o archivos de video directos (.mp4, .mkv, .webm, etc.)")
+
 
 
 class ProcessRequest(BaseModel):
     """Request para el endpoint síncrono /process"""
-    video_url:  str
+    video_url: str
     format: AudioFormat = AudioFormat.MP3
     quality: AudioQuality = AudioQuality.MEDIUM
     
     @field_validator("video_url")
     @classmethod
     def validate_url(cls, v: str) -> str:
-        supported = ["youtube.com", "youtu.be", "vimeo.com"]
-        if not any(domain in v.lower() for domain in supported):
-            raise ValueError("Solo se soportan URLs de YouTube o Vimeo")
-        return v.strip()
+        v = v.strip()
+        
+        # Soportar YouTube/Vimeo
+        video_platforms = ["youtube.com", "youtu.be", "vimeo.com"]
+        if any(domain in v.lower() for domain in video_platforms):
+            return v
+        
+        # Soportar URLs directas de archivos de video
+        video_extensions = [".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".mpeg", ".mpg", ".3gp"]
+        if any(v.lower().endswith(ext) for ext in video_extensions):
+            return v
+        
+        # Soportar URLs de Supabase Storage
+        if "supabase.co/storage" in v.lower():
+            return v
+        
+        raise ValueError("Solo se soportan URLs de YouTube, Vimeo o archivos de video directos (.mp4, .mkv, .webm, etc.)")
 
 
 # ============== Responses ==============
