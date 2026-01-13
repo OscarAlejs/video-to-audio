@@ -137,10 +137,13 @@ async def process_job(job_id: str, request: ExtractRequest) -> None:
     start_time = time.time()
     
     try:
+        print(f"🚀 Iniciando job {job_id[:8]} - URL: {request.url}")
+        
         # 1. Obtener info del video
         update_job(job_id, status="processing", progress=5, stage="Obteniendo información del video...")
         
         info = await asyncio.to_thread(video.get_video_info, request.url)
+        print(f"📊 Video: {info.title} ({info.duration_formatted})")
         
         # Guardar info del video
         update_job(
@@ -178,15 +181,16 @@ async def process_job(job_id: str, request: ExtractRequest) -> None:
         audio_url = await asyncio.to_thread(storage.upload_file, audio_file)
         
         # 5. Obtener tamaño del archivo
-        file_size = video. format_file_size(audio_file. stat().st_size)
+        file_size = video.format_file_size(audio_file.stat().st_size)
         
         # 6. Limpiar archivo temporal
-        video. cleanup_file(audio_file)
+        video.cleanup_file(audio_file)
         
         # 7. Calcular tiempo de procesamiento
         processing_time = round(time.time() - start_time, 2)
         
         # 8. Completar job
+        print(f"✅ Job {job_id[:8]} completado en {processing_time}s")
         update_job(
             job_id,
             status="completed",
@@ -199,6 +203,7 @@ async def process_job(job_id: str, request: ExtractRequest) -> None:
         
     except Exception as e:
         processing_time = round(time.time() - start_time, 2)
+        print(f"❌ Job {job_id[:8]} falló después de {processing_time}s: {str(e)}")
         
         update_job(
             job_id,
@@ -227,6 +232,8 @@ async def process_upload_job(
     audio_file = None
     
     try:
+        print(f"📤 Procesando upload job {job_id[:8]} - Archivo: {filename}")
+        
         # 1. Validar archivo
         update_job(job_id, status="processing", progress=5, stage="Validando archivo...")
         
@@ -294,6 +301,7 @@ async def process_upload_job(
         processing_time = round(time.time() - start_time, 2)
         
         # 8. Completar job
+        print(f"✅ Upload job {job_id[:8]} completado en {processing_time}s - {file_size_formatted}")
         update_job(
             job_id,
             status="completed",
@@ -306,6 +314,7 @@ async def process_upload_job(
         
     except Exception as e: 
         processing_time = round(time.time() - start_time, 2)
+        print(f"❌ Upload job {job_id[:8]} falló: {str(e)}")
         
         # Limpiar archivos temporales en caso de error
         if temp_video_path and temp_video_path.exists():
