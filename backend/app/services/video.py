@@ -60,8 +60,8 @@ def get_base_ydl_opts() -> dict:
         # === EXTRACTORS ===
         "extractor_args": {
             "youtube": {
-                "player_client": "android",  # Android más estable que web
-                "skip": ["hls", "dash"],      # Evitar streaming fragmentado
+                "player_client": ["android", "web"],  # Try multiple clients for better compatibility
+                # Removed "skip": ["hls", "dash"] - was blocking too many formats
             },
             "vimeo": {"http_version": "1.1"},
         },
@@ -284,8 +284,8 @@ def download_and_extract(
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
-        # === FORMATO: Solo audio para evitar fragmentos ===
-        "format": "bestaudio/best",
+        # === FORMATO: Audio con múltiples fallbacks ===
+        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best/worst",
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": output_format.value,
