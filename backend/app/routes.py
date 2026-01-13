@@ -66,6 +66,8 @@ async def process_video(request: ProcessRequest):
     start_time = time.time()
     settings = get_settings()
     
+    print(f"🎬 Procesando video: {request.video_url}")
+    
     if not storage.is_configured():
         return ProcessResponse(
             status="error",
@@ -151,6 +153,7 @@ async def process_video(request: ProcessRequest):
             processing_time=processing_time,
         )
         
+        print(f"✅ Video procesado en {processing_time}s")
         return ProcessResponse(
             status="success",
             audio_url=audio_url,
@@ -167,6 +170,7 @@ async def process_video(request: ProcessRequest):
         
     except Exception as e:
         processing_time = round(time.time() - start_time, 2)
+        print(f"❌ Error procesando: {str(e)}")
         
         db.update_job(
             job_id,
@@ -339,6 +343,8 @@ async def upload_video_file(
     """
     start_time = time.time()
     
+    print(f"📤 Upload iniciado: {file.filename} ({file.size / 1024 / 1024:.1f}MB)" if file.size else f"📤 Upload iniciado: {file.filename}")
+    
     if not storage.is_configured():
         return UploadResponse(
             status="error",
@@ -462,6 +468,7 @@ async def upload_video_file(
             processing_time=processing_time,
         )
         
+        print(f"✅ Upload procesado: {audio_url}")
         return UploadResponse(
             status="success",
             audio_url=audio_url,
@@ -481,6 +488,7 @@ async def upload_video_file(
         
     except Exception as e:
         processing_time = round(time.time() - start_time, 2)
+        print(f"❌ Error en upload: {str(e)}")
         
         # Limpiar archivos temporales
         if temp_video_path:

@@ -25,13 +25,24 @@ async def lifespan(app: FastAPI):
     """Lifecycle de la aplicación"""
     # Startup
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    print("🚀 Video to Audio API iniciada")
+    settings = get_settings()
+    
+    print("=" * 60)
+    print("🚀 Video to Audio API")
+    print(f"📦 Version: 1.0.0")
+    print(f"🗄️  Supabase: {'✅ Configurado' if settings.supabase_url else '❌ No configurado'}")
+    print(f"⏱️  Max duración: {settings.max_duration_minutes} min")
+    print(f"💾 Max tamaño archivo: {settings.max_file_size_mb} MB")
+    print("=" * 60)
     
     yield
     
     # Shutdown
-    video.cleanup_old_files(max_age_hours=0)  # Limpiar todo
-    print("👋 Video to Audio API detenida")
+    cleaned = video.cleanup_old_files(max_age_hours=0)
+    print("=" * 60)
+    print(f"👋 Video to Audio API detenida")
+    print(f"🧹 Archivos temporales limpiados: {cleaned}")
+    print("=" * 60)
 
 
 def create_app() -> FastAPI:
@@ -58,7 +69,9 @@ def create_app() -> FastAPI:
     
     # Middleware de timeout para peticiones largas (EXCEPTO uploads)
     @app.middleware("http")
-    async def timeout_middleware(request:  Request, call_next):
+    async def timeout_middleware(request: Request, call_next):
+        start_time = time.time()
+        
         # Excluir rutas de upload del timeout global
         EXCLUDED_PATHS = [
             "/api/upload",
@@ -67,17 +80,29 @@ def create_app() -> FastAPI:
             "/api/upload/streaming",  # Nueva ruta sin timeout
         ]
         
+        # Log de request entrante (solo para endpoints importantes)
+        if request.url.path.startswith("/api/") and not request.url.path == "/api/health":
+            print(f"📥 {request.method} {request.url.path}")
+        
         # Si la ruta está excluida, no aplicar timeout
-        if any(request.url.path. startswith(path) for path in EXCLUDED_PATHS):
+        if any(request.url.path.startswith(path) for path in EXCLUDED_PATHS):
             return await call_next(request)
         
         # Para otras rutas, aplicar timeout de 10 minutos
+        TIMEOUT_LIMIT = 600  # 10 minutos
+        
         try:
-            start_time = time.time()
-            TIMEOUT_LIMIT = 600  # 10 minutos
-            return await asyncio.wait_for(call_next(request), timeout=TIMEOUT_LIMIT)
+            response = await asyncio.wait_for(call_next(request), timeout=TIMEOUT_LIMIT)
+            
+            # Log de respuesta exitosa (solo requests lentos)
+            process_time = time.time() - start_time
+            if process_time > 5:  # Solo loguear requests lentos
+                print(f"⏱️  {request.method} {request.url.path} - {process_time:.2f}s")
+            
+            return response
         except asyncio.TimeoutError:
             process_time = time.time() - start_time
+            print(f"❌ TIMEOUT: {request.method} {request.url.path} - {process_time:.2f}s")
             return JSONResponse(
                 {
                     'detail': f'La petición excedió el límite de {TIMEOUT_LIMIT} segundos.',

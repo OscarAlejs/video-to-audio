@@ -128,6 +128,9 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 5
     storage_path = f"{folder}/{timestamp}_{safe_name}"
     
     file_size = file_path.stat().st_size
+    file_size_mb = file_size / (1024 * 1024)
+    
+    print(f"📤 Subiendo {file_path.name} ({file_size_mb:.1f}MB) usando TUS...")
     
     # Detectar content type
     extension = file_path.suffix.lower()[1:]
@@ -209,6 +212,9 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 5
                             offset = int(new_offset)
                         else:
                             offset += chunk_len
+                        
+                        progress = (offset / file_size) * 100
+                        print(f"   Progreso: {progress:.1f}% ({offset}/{file_size} bytes)")
                         chunk_uploaded = True
                         break
                     else:
@@ -216,6 +222,7 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 5
                         
                 except (requests.exceptions.RequestException, Exception) as e:
                     if attempt < max_retries - 1:
+                        print(f"⚠️  Reintentando chunk (intento {attempt + 1}/{max_retries})...")
                         wait_time = min(2 ** attempt, 30)
                         time.sleep(wait_time)
                         
@@ -238,6 +245,7 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 5
                             pass
                         continue
                     else:
+                        print(f"❌ Error subiendo chunk después de {max_retries} intentos")
                         raise Exception(f"Error subiendo chunk offset {offset} después de {max_retries} intentos: {str(e)}")
             
             if not chunk_uploaded:
@@ -247,6 +255,7 @@ def upload_file_tus(file_path: Path, folder: str = "audio", max_retries: int = 5
     
     # Construir URL pública
     public_url = f"{settings.supabase_url}/storage/v1/object/public/{settings.supabase_bucket}/{storage_path}"
+    print(f"✅ Archivo subido exitosamente: {storage_path}")
     return public_url
 
 

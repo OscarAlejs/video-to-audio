@@ -90,22 +90,38 @@ def download_and_extract(
     unique_id = str(uuid.uuid4())[:8]
     output_template = str(TEMP_DIR / f"{unique_id}_%(title).50s.%(ext)s")
     
+    print(f"🎬 Descargando video de {url}")
+    
     def progress_hook(d):
-        if d["status"] == "downloading" and progress_callback:
-            percent = 0
+        if d["status"] == "downloading":
+            if progress_callback:
+                percent = 0
+                if d.get("total_bytes"):
+                    percent = int(d.get("downloaded_bytes", 0) / d["total_bytes"] * 50)
+                elif d.get("total_bytes_estimate"):
+                    percent = int(d.get("downloaded_bytes", 0) / d["total_bytes_estimate"] * 50)
+                progress_callback("downloading", percent)
+            
+            # Log de progreso de descarga
             if d.get("total_bytes"):
-                percent = int(d.get("downloaded_bytes", 0) / d["total_bytes"] * 50)
-            elif d.get("total_bytes_estimate"):
-                percent = int(d.get("downloaded_bytes", 0) / d["total_bytes_estimate"] * 50)
-            progress_callback("downloading", percent)
-        elif d["status"] == "finished" and progress_callback:
-            progress_callback("extracting", 60)
+                mb_downloaded = d.get("downloaded_bytes", 0) / (1024 * 1024)
+                mb_total = d["total_bytes"] / (1024 * 1024)
+                percent = int(d.get("downloaded_bytes", 0) / d["total_bytes"] * 100)
+                print(f"   📥 Descarga: {mb_downloaded:.1f}/{mb_total:.1f} MB ({percent}%)")
+        elif d["status"] == "finished":
+            print(f"   ✅ Descarga completada")
+            if progress_callback:
+                progress_callback("extracting", 60)
     
     def postprocessor_hook(d):
-        if d["status"] == "started" and progress_callback:
-            progress_callback("extracting", 70)
-        elif d["status"] == "finished" and progress_callback:
-            progress_callback("extracting", 90)
+        if d["status"] == "started":
+            print(f"   🎵 Extrayendo audio...")
+            if progress_callback:
+                progress_callback("extracting", 70)
+        elif d["status"] == "finished":
+            print(f"   ✅ Audio extraído")
+            if progress_callback:
+                progress_callback("extracting", 90)
     
     ydl_opts = {
         **get_base_ydl_opts(),
@@ -143,6 +159,7 @@ def download_and_extract(
         
         for file in TEMP_DIR.glob(f"{unique_id}_*"):
             if file.suffix == f".{output_format.value}":
+                print(f"✅ Proceso completado: {video_info.title}")
                 return file, video_info
     
     raise FileNotFoundError("No se encontró el archivo de audio generado")
