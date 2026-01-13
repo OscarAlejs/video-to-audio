@@ -285,7 +285,7 @@ def download_and_extract(
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
         # === FORMATO: Solo audio para evitar fragmentos ===
-        "format": "bestaudio/best",
+        "format": "worstvideo+bestaudio/bestaudio/worst",
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": output_format.value,
