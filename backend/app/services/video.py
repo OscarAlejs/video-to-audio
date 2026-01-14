@@ -43,9 +43,9 @@ def get_base_ydl_opts() -> dict:
         "quiet": True,
         "no_warnings": True,
         # === ESTABILIDAD ===
-        "concurrent_fragment_downloads": 1,
+        "concurrent_fragment_downloads": 1,  # Sin concurrencia (evita ConnectionTerminated)
         "retries": 15,
-        "fragment_retries":  15,
+        "fragment_retries": 15,
         "file_access_retries": 10,
         "extractor_retries": 5,
         # === FIX HTTP/2 ===
@@ -53,6 +53,7 @@ def get_base_ydl_opts() -> dict:
         "http_version": "1.1",
         "socket_timeout": 30,
         "http_headers": {
+            # Chrome 131 User-Agent for optimal compatibility with YouTube servers
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-us,en;q=0.5",
@@ -60,7 +61,8 @@ def get_base_ydl_opts() -> dict:
         },
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "web", "android"],  # Múltiples clientes como fallback
+                "player_client": ["web"],  # Array format required for yt-dlp >= 2025.12.01
+                "skip": ["hls", "dash"],  # Skip HLS/DASH to avoid connection instability
             },
             "vimeo": {"http_version": "1.1"},
         },
@@ -68,6 +70,7 @@ def get_base_ydl_opts() -> dict:
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
     return opts
+
 
 def is_direct_file_url(url: str) -> bool:
     """Detecta si es una URL directa de archivo"""
@@ -277,19 +280,19 @@ def download_and_extract(
             if progress_callback:
                 progress_callback("extracting", 90)
     
-   ydl_opts = {
-    **get_base_ydl_opts(),
-    "outtmpl": output_template,
-    "progress_hooks": [progress_hook],
-    "postprocessor_hooks": [postprocessor_hook],
-    # NO especificar formato, dejar que yt-dlp elija automáticamente
-    # "format": "ba/b",  # <-- comentar o remover esta línea
-    "postprocessors": [{
-        "key": "FFmpegExtractAudio",
-        "preferredcodec":  output_format.value,
-        "preferredquality": quality. value,
-    }],
-}
+    ydl_opts = {
+        **get_base_ydl_opts(),
+        "outtmpl": output_template,
+        "progress_hooks": [progress_hook],
+        "postprocessor_hooks": [postprocessor_hook],
+        # === FORMATO ===
+        "format": "worstvideo+bestaudio/bestaudio/worst",
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": output_format.value,
+            "preferredquality": quality.value,
+        }],
+    }
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
