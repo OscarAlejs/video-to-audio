@@ -43,7 +43,7 @@ def get_base_ydl_opts() -> dict:
         "quiet": True,
         "no_warnings": True,
         # === ESTABILIDAD ===
-        "concurrent_fragment_downloads": 1,  # Sin concurrencia (evita ConnectionTerminated)
+        "concurrent_fragment_downloads": 1,
         "retries": 15,
         "fragment_retries": 15,
         "file_access_retries": 10,
@@ -53,7 +53,6 @@ def get_base_ydl_opts() -> dict:
         "http_version": "1.1",
         "socket_timeout": 30,
         "http_headers": {
-            # Chrome 131 User-Agent for optimal compatibility with YouTube servers
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-us,en;q=0.5",
@@ -61,8 +60,8 @@ def get_base_ydl_opts() -> dict:
         },
         "extractor_args": {
             "youtube": {
-                "player_client": ["web"],  # Array format required for yt-dlp >= 2025.12.01
-                "skip": ["hls", "dash"],  # Skip HLS/DASH to avoid connection instability
+                "player_client": ["web"],
+                # REMOVER: "skip": ["hls", "dash"],  # Esto está causando el error
             },
             "vimeo": {"http_version": "1.1"},
         },
