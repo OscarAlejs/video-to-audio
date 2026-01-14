@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pathlib import Path
 
-from ..models import (
+from .. models import (
     AudioFormat,
     AudioQuality,
     ExtractRequest,
@@ -19,7 +19,7 @@ from ..models import (
 from . import video, storage, db, upload
 
 
-def create_job(video_url:  str, format: str, quality: str, source: str = "web") -> JobResponse:
+def create_job(video_url: str, format:  str, quality: str, source: str = "web") -> JobResponse:
     """Crea un nuevo job en Supabase"""
     job_data = db.create_job(
         video_url=video_url,
@@ -30,7 +30,7 @@ def create_job(video_url:  str, format: str, quality: str, source: str = "web") 
     
     return JobResponse(
         job_id=job_data["id"],
-        status=JobStatus. PENDING,
+        status=JobStatus.PENDING,
         progress=0,
         message="Iniciando.. .",
         created_at=datetime.fromisoformat(job_data["created_at"]. replace("Z", "+00:00")) if isinstance(job_data["created_at"], str) else job_data["created_at"],
@@ -41,10 +41,10 @@ def get_job(job_id: str) -> JobResponse | None:
     """Obtiene un job de Supabase"""
     job_data = db.get_job(job_id)
     
-    if not job_data: 
+    if not job_data:
         return None
     
-    # ✅ CAMBIO:  Construir video_info solo si hay datos válidos
+    # ✅ CAMBIO: Construir video_info solo si hay datos válidos
     video_info = None
     # Verificar que al menos tengamos id y source (campos requeridos antes)
     if job_data.get("video_id") or job_data.get("video_title"):
@@ -52,7 +52,7 @@ def get_job(job_id: str) -> JobResponse | None:
             id=job_data. get("video_id"),  # Puede ser None ahora
             title=job_data.get("video_title"),
             duration_seconds=job_data.get("video_duration"),
-            duration_formatted=video.format_duration(job_data.get("video_duration")) if job_data.get("video_duration") else None,
+            duration_formatted=video. format_duration(job_data. get("video_duration")) if job_data.get("video_duration") else None,
             thumbnail=job_data.get("video_thumbnail"),
             source=job_data.get("video_source"),  # Puede ser None ahora
             channel=job_data.get("video_channel"),
@@ -60,11 +60,11 @@ def get_job(job_id: str) -> JobResponse | None:
     
     # Construir result si completado o fallido
     result = None
-    if job_data["status"] == "completed" and job_data. get("audio_url"):
+    if job_data["status"] == "completed" and job_data.get("audio_url"):
         result = ExtractResult(
             success=True,
             audio_url=job_data["audio_url"],
-            file_size=job_data.get("file_size"),
+            file_size=job_data. get("file_size"),
             format=job_data.get("format", "mp3").upper(),
             quality=f"{job_data.get('quality', '192')} kbps",
         )
@@ -76,13 +76,13 @@ def get_job(job_id: str) -> JobResponse | None:
     
     created_at = job_data["created_at"]
     if isinstance(created_at, str):
-        created_at = datetime.fromisoformat(created_at. replace("Z", "+00:00"))
+        created_at = datetime. fromisoformat(created_at.replace("Z", "+00:00"))
     
     return JobResponse(
         job_id=job_data["id"],
         status=JobStatus(job_data["status"]),
         progress=job_data.get("progress", 0),
-        message=job_data.get("stage", ""),
+        message=job_data. get("stage", ""),
         created_at=created_at,
         video_info=video_info,  # Puede ser None ahora
         result=result,
@@ -99,10 +99,10 @@ def delete_job(job_id: str) -> bool:
     return db.delete_job(job_id)
 
 
-def get_all_jobs(limit: int = 50) -> list[JobResponse]:
+def get_all_jobs(limit: int = 50) -> list[JobResponse]: 
     """
     Obtiene todos los jobs
-    ✅ CAMBIO:  Manejo de errores para jobs con datos incompletos
+    ✅ CAMBIO: Manejo de errores para jobs con datos incompletos
     """
     jobs_data = db.list_jobs(limit=limit)
     result = []
@@ -137,13 +137,13 @@ async def process_job(job_id: str, request: ExtractRequest) -> None:
     start_time = time.time()
     
     try:
-        print(f"🚀 Iniciando job {job_id[:8]} - URL: {request.url}")
+        print(f"🚀 Iniciando job {job_id[: 8]} - URL: {request.url}")
         
         # 1. Obtener info del video
         update_job(job_id, status="processing", progress=5, stage="Obteniendo información del video...")
         
         info = await asyncio.to_thread(video.get_video_info, request.url)
-        print(f"📊 Video: {info.title} ({info.duration_formatted})")
+        print(f"📊 Video:  {info.title} ({info.duration_formatted})")
         
         # Guardar info del video
         update_job(
@@ -161,14 +161,14 @@ async def process_job(job_id: str, request: ExtractRequest) -> None:
         def on_progress(stage: str, percent: int):
             if stage == "downloading":
                 update_job(job_id, status="downloading", progress=10 + percent, stage="Descargando video...")
-            elif stage == "extracting": 
+            elif stage == "extracting":
                 update_job(job_id, status="extracting", progress=percent, stage="Extrayendo audio...")
         
         # 3. Descargar y extraer
         update_job(job_id, status="downloading", progress=15, stage="Descargando video...")
         
-        audio_file, video_info = await asyncio.to_thread(
-            video.download_and_extract,
+        # ✅ CAMBIO CRÍTICO: Usar await directamente (NO asyncio.to_thread)
+        audio_file, video_info = await video.download_and_extract(
             request.url,
             request.format,
             request.quality,
@@ -181,16 +181,16 @@ async def process_job(job_id: str, request: ExtractRequest) -> None:
         audio_url = await asyncio.to_thread(storage.upload_file, audio_file)
         
         # 5. Obtener tamaño del archivo
-        file_size = video.format_file_size(audio_file.stat().st_size)
+        file_size = video. format_file_size(audio_file. stat().st_size)
         
         # 6. Limpiar archivo temporal
-        video.cleanup_file(audio_file)
+        video. cleanup_file(audio_file)
         
         # 7. Calcular tiempo de procesamiento
         processing_time = round(time.time() - start_time, 2)
         
         # 8. Completar job
-        print(f"✅ Job {job_id[:8]} completado en {processing_time}s")
+        print(f"✅ Job {job_id[: 8]} completado en {processing_time}s")
         update_job(
             job_id,
             status="completed",
@@ -201,9 +201,9 @@ async def process_job(job_id: str, request: ExtractRequest) -> None:
             processing_time=processing_time,
         )
         
-    except Exception as e:
+    except Exception as e: 
         processing_time = round(time.time() - start_time, 2)
-        print(f"❌ Job {job_id[:8]} falló después de {processing_time}s: {str(e)}")
+        print(f"❌ Job {job_id[: 8]} falló después de {processing_time}s: {str(e)}")
         
         update_job(
             job_id,
@@ -258,7 +258,7 @@ async def process_upload_job(
         )
         
         # Validar duración
-        from ..config import get_settings
+        from .. config import get_settings
         settings = get_settings()
         if duration and duration > settings.max_duration_minutes * 60:
             raise ValueError(
@@ -277,7 +277,7 @@ async def process_upload_job(
         # 3. Extraer audio
         update_job(job_id, status="extracting", progress=20, stage="Extrayendo audio...")
         
-        audio_file = await asyncio.to_thread(
+        audio_file = await asyncio. to_thread(
             upload.extract_audio_from_file,
             temp_video_path,
             audio_format,
@@ -314,7 +314,7 @@ async def process_upload_job(
         
     except Exception as e: 
         processing_time = round(time.time() - start_time, 2)
-        print(f"❌ Upload job {job_id[:8]} falló: {str(e)}")
+        print(f"❌ Upload job {job_id[:8]} falló:  {str(e)}")
         
         # Limpiar archivos temporales en caso de error
         if temp_video_path and temp_video_path.exists():
