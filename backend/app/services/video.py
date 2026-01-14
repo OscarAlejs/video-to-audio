@@ -46,13 +46,12 @@ def get_base_ydl_opts() -> dict:
         "concurrent_fragment_downloads": 1,  # Sin concurrencia (evita ConnectionTerminated)
         "retries": 10,
         "fragment_retries": 10,
+        "socket_timeout": 30,
+        "http_chunk_size": 10485760,  # 10MB - refresca conexiones periódicamente
         # === FIX HTTP/2 ===
         "legacy_server_connect": True,
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        },
         "extractor_args": {
-            "youtube": {"player_client": "web"},
+            "youtube": {"player_client": "android"},
             "vimeo": {"http_version": "1.1"},
         },
     }
