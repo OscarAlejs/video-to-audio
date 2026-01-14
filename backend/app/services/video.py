@@ -44,15 +44,25 @@ def get_base_ydl_opts() -> dict:
         "no_warnings": True,
         # === ESTABILIDAD ===
         "concurrent_fragment_downloads": 1,  # Sin concurrencia (evita ConnectionTerminated)
-        "retries": 10,
-        "fragment_retries": 10,
+        "retries": 15,
+        "fragment_retries": 15,
+        "file_access_retries": 10,
+        "extractor_retries": 5,
         # === FIX HTTP/2 ===
         "legacy_server_connect": True,
+        "http_version": "1.1",
+        "socket_timeout": 30,
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-us,en;q=0.5",
+            "Sec-Fetch-Mode": "navigate",
         },
         "extractor_args": {
-            "youtube": {"player_client": "web"},
+            "youtube": {
+                "player_client": ["web"],
+                "skip": ["hls", "dash"],
+            },
             "vimeo": {"http_version": "1.1"},
         },
     }
