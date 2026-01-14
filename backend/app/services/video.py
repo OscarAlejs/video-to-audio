@@ -45,7 +45,7 @@ def get_base_ydl_opts() -> dict:
         # === ESTABILIDAD ===
         "concurrent_fragment_downloads": 1,
         "retries": 15,
-        "fragment_retries": 15,
+        "fragment_retries":  15,
         "file_access_retries": 10,
         "extractor_retries": 5,
         # === FIX HTTP/2 ===
@@ -60,8 +60,7 @@ def get_base_ydl_opts() -> dict:
         },
         "extractor_args": {
             "youtube": {
-                "player_client": ["web"],
-                # REMOVER: "skip": ["hls", "dash"],  # Esto está causando el error
+                "player_client": ["ios", "web", "android"],  # Múltiples clientes como fallback
             },
             "vimeo": {"http_version": "1.1"},
         },
@@ -69,7 +68,6 @@ def get_base_ydl_opts() -> dict:
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
     return opts
-
 
 def is_direct_file_url(url: str) -> bool:
     """Detecta si es una URL directa de archivo"""
@@ -279,17 +277,17 @@ def download_and_extract(
             if progress_callback:
                 progress_callback("extracting", 90)
     
-    ydl_opts = {
+   ydl_opts = {
     **get_base_ydl_opts(),
     "outtmpl": output_template,
     "progress_hooks": [progress_hook],
     "postprocessor_hooks": [postprocessor_hook],
-    # === FORMATO ===
-    "format": "bestaudio/best",  # Más compatible, siempre encuentra un formato
-    "postprocessors":  [{
+    # NO especificar formato, dejar que yt-dlp elija automáticamente
+    # "format": "ba/b",  # <-- comentar o remover esta línea
+    "postprocessors": [{
         "key": "FFmpegExtractAudio",
-        "preferredcodec": output_format.value,
-        "preferredquality": quality.value,
+        "preferredcodec":  output_format.value,
+        "preferredquality": quality. value,
     }],
 }
     
