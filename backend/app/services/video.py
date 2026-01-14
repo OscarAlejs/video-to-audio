@@ -1,349 +1,333 @@
 """
-Servicio de descarga y extracción de audio
+Servicio de gestión de trabajos de extracción
 """
 import asyncio
-import uuid
-import requests
+import time
+from datetime import datetime
+
 from pathlib import Path
-from typing import Callable, Optional
-from urllib.parse import urlparse
 
-import yt_dlp
-
-from .. config import get_settings
-from ..models import AudioFormat, AudioQuality, VideoInfo
-
-
-TEMP_DIR = Path("/tmp/video-to-audio")
-TEMP_DIR.mkdir(parents=True, exist_ok=True)
-
-COOKIES_FILE = Path("/app/cookies.txt")
-
-# Semáforo global para limitar descargas concurrentes de YouTube/Vimeo
-# Máximo 2 descargas simultáneas para evitar ConnectionTerminated
-_download_semaphore = asyncio. Semaphore(2)
+from .. models import (
+    AudioFormat,
+    AudioQuality,
+    ExtractRequest,
+    ExtractResult,
+    JobResponse,
+    JobStatus,
+    VideoInfo,
+)
+from . import video, storage, db, upload
 
 
-def format_duration(seconds: int) -> str:
-    if not seconds:
-        return "0:00"
-    minutes, secs = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours: 
-        return f"{hours}:{minutes:02d}:{secs:02d}"
-    return f"{minutes}:{secs: 02d}"
-
-
-def format_file_size(bytes_size: int) -> str:
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if bytes_size < 1024: 
-            return f"{bytes_size:.1f} {unit}"
-        bytes_size /= 1024
-    return f"{bytes_size:.1f} TB"
-
-
-def get_base_ydl_opts() -> dict:
-    """Opciones base - estabilidad y rate limiting"""
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        # === ESTABILIDAD ===
-        "concurrent_fragment_downloads": 1,  # Sin concurrencia (evita ConnectionTerminated)
-        "retries": 10,
-        "fragment_retries": 10,
-        "socket_timeout": 30,
-        "http_chunk_size": 10485760,  # 10MB - refresca conexiones periódicamente
-        # === RATE LIMITING ===
-        "sleep_interval": 1,
-        "max_sleep_interval": 5,
-        "sleep_interval_requests": 1,
-        # === FIX HTTP/2 ===
-        "legacy_server_connect": True,
-        "extractor_args": {
-            "youtube":  {
-                "player_client":  "android",
-                "player_skip":  ["web"],
-            },
-            "vimeo":  {"http_version": "1.1"},
-        },
-    }
-    if COOKIES_FILE.exists():
-        opts["cookiefile"] = str(COOKIES_FILE)
-    return opts
-
-
-def is_direct_file_url(url: str) -> bool:
-    """Detecta si es una URL directa de archivo"""
-    video_extensions = [". mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".wmv", ".m4v", ". mpeg", ".mpg", ".3gp"]
+def create_job(video_url:   str, format:  str, quality: str, source: str = "web") -> JobResponse:
+    """Crea un nuevo job en Supabase"""
+    job_data = db.create_job(
+        video_url=video_url,
+        format=format,
+        quality=quality,
+        source=source
+    )
     
-    # Extensión en URL
-    if any(url.lower().endswith(ext) for ext in video_extensions):
-        return True
-    
-    # URLs de Supabase Storage
-    if "supabase. co/storage" in url. lower():
-        return True
-    
-    return False
+    return JobResponse(
+        job_id=job_data["id"],
+        status=JobStatus. PENDING,
+        progress=0,
+        message="Iniciando.. .",
+        created_at=datetime.fromisoformat(job_data["created_at"]. replace("Z", "+00:00")) if isinstance(job_data["created_at"], str) else job_data["created_at"],
+    )
 
 
-def download_direct_file(url: str, output_path: Path) -> Path:
+def get_job(job_id: str) -> JobResponse | None:
+    """Obtiene un job de Supabase"""
+    job_data = db.get_job(job_id)
+    
+    if not job_data:  
+        return None
+    
+    # ✅ CAMBIO:   Construir video_info solo si hay datos válidos
+    video_info = None
+    # Verificar que al menos tengamos id y source (campos requeridos antes)
+    if job_data.get("video_id") or job_data.get("video_title"):
+        video_info = VideoInfo(
+            id=job_data. get("video_id"),  # Puede ser None ahora
+            title=job_data.get("video_title"),
+            duration_seconds=job_data.get("video_duration"),
+            duration_formatted=video.format_duration(job_data.get("video_duration")) if job_data.get("video_duration") else None,
+            thumbnail=job_data.get("video_thumbnail"),
+            source=job_data.get("video_source"),  # Puede ser None ahora
+            channel=job_data.get("video_channel"),
+        )
+    
+    # Construir result si completado o fallido
+    result = None
+    if job_data["status"] == "completed" and job_data.get("audio_url"):
+        result = ExtractResult(
+            success=True,
+            audio_url=job_data["audio_url"],
+            file_size=job_data. get("file_size"),
+            format=job_data.get("format", "mp3").upper(),
+            quality=f"{job_data.get('quality', '192')} kbps",
+        )
+    elif job_data["status"] == "failed":
+        result = ExtractResult(
+            success=False,
+            error=job_data.get("error_message", "Error desconocido"),
+        )
+    
+    created_at = job_data["created_at"]
+    if isinstance(created_at, str):
+        created_at = datetime. fromisoformat(created_at.replace("Z", "+00:00"))
+    
+    return JobResponse(
+        job_id=job_data["id"],
+        status=JobStatus(job_data["status"]),
+        progress=job_data. get("progress", 0),
+        message=job_data.get("stage", ""),
+        created_at=created_at,
+        video_info=video_info,  # Puede ser None ahora
+        result=result,
+    )
+
+
+def update_job(job_id: str, **kwargs) -> None:
+    """Actualiza un job en Supabase"""
+    db.update_job(job_id, **kwargs)
+
+
+def delete_job(job_id: str) -> bool:
+    """Elimina un job"""
+    return db.delete_job(job_id)
+
+
+def get_all_jobs(limit: int = 50) -> list[JobResponse]: 
     """
-    Descarga un archivo directo desde una URL
+    Obtiene todos los jobs
+    ✅ CAMBIO:   Manejo de errores para jobs con datos incompletos
     """
-    print(f"📥 Descargando archivo directo: {url}")
+    jobs_data = db.list_jobs(limit=limit)
+    result = []
+    
+    for j in jobs_data:
+        try:
+            job = get_job(j["id"])
+            if job:
+                result.append(job)
+        except Exception as e:
+            # Log error pero continuar con los demás jobs
+            print(f"⚠️ Error al obtener job {j. get('id', 'unknown')}: {e}")
+            continue
+    
+    return result
+
+
+def get_stats() -> dict:
+    """Obtiene estadísticas de jobs"""
+    return db.get_jobs_stats()
+
+
+def cleanup_old_jobs(max_age_hours: int = 24) -> int:
+    """Limpia jobs antiguos"""
+    return db.cleanup_old_jobs(max_age_hours)
+
+
+async def process_job(job_id: str, request: ExtractRequest) -> None:
+    """
+    Procesa un job de extracción de forma asíncrona
+    """
+    start_time = time.time()
     
     try:
-        response = requests.get(url, stream=True, timeout=30)
-        response.raise_for_status()
+        print(f"🚀 Iniciando job {job_id[: 8]} - URL: {request.url}")
         
-        total_size = int(response.headers.get('content-length', 0))
-        downloaded = 0
+        # 1. Obtener info del video
+        update_job(job_id, status="processing", progress=5, stage="Obteniendo información del video...")
         
-        with open(output_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    
-                    if total_size > 0:
-                        progress = (downloaded / total_size) * 100
-                        if progress % 10 < 1:  # Log cada 10%
-                            print(f"   📥 Descarga: {progress:.0f}%")
+        info = await asyncio.to_thread(video.get_video_info, request.url)
+        print(f"📊 Video:  {info.title} ({info.duration_formatted})")
         
-        print(f"✅ Descarga completada:  {output_path. name}")
-        return output_path
-        
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"Error descargando archivo:  {str(e)}")
-
-
-def get_video_duration_from_file(file_path: Path) -> Optional[int]:
-    """Obtiene duración de un archivo de video usando ffprobe"""
-    try: 
-        import subprocess
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                str(file_path)
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30
+        # Guardar info del video
+        update_job(
+            job_id,
+            progress=10,
+            video_title=info.title,
+            video_id=info.id,
+            video_duration=info.duration_seconds,
+            video_thumbnail=info.thumbnail,
+            video_source=info.source,
+            video_channel=info.channel,
         )
-        if result.returncode == 0 and result.stdout. strip():
-            return int(float(result.stdout.strip()))
-    except Exception:
-        pass
-    return None
-
-
-def get_video_info(url: str) -> VideoInfo:
-    """Obtiene información del video (YouTube/Vimeo o archivo directo)"""
-    
-    # Si es archivo directo, obtener info básica
-    if is_direct_file_url(url):
-        filename = urlparse(url).path.split('/')[-1]
-        return VideoInfo(
-            id="direct_file",
-            title=filename,
-            duration_seconds=0,  # Se obtendrá después de descargar
-            duration_formatted="Desconocida",
-            thumbnail=None,
-            source="direct_url",
-            channel=None,
-        )
-    
-    # YouTube/Vimeo (código existente)
-    ydl_opts = {
-        **get_base_ydl_opts(),
-        "extract_flat": False,
-    }
-    
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        duration = info.get("duration", 0) or 0
         
-        return VideoInfo(
-            id=info.get("id", "unknown"),
-            title=info.get("title", "Sin título"),
-            duration_seconds=duration,
-            duration_formatted=format_duration(duration),
-            thumbnail=info. get("thumbnail"),
-            source=info.get("extractor", "unknown"),
-            channel=info. get("channel") or info.get("uploader"),
+        # 2. Callback para progreso
+        def on_progress(stage: str, percent: int):
+            if stage == "downloading":
+                update_job(job_id, status="downloading", progress=10 + percent, stage="Descargando video...")
+            elif stage == "extracting":  
+                update_job(job_id, status="extracting", progress=percent, stage="Extrayendo audio...")
+        
+        # 3. Descargar y extraer
+        update_job(job_id, status="downloading", progress=15, stage="Descargando video...")
+        
+        # ✅ CAMBIO:  Usar await directamente en lugar de asyncio.to_thread
+        audio_file, video_info = await video.download_and_extract(
+            request.url,
+            request.format,
+            request.quality,
+            on_progress,
+        )
+        
+        # 4. Subir a Supabase
+        update_job(job_id, status="uploading", progress=92, stage="Subiendo a la nube...")
+        
+        audio_url = await asyncio.to_thread(storage.upload_file, audio_file)
+        
+        # 5. Obtener tamaño del archivo
+        file_size = video. format_file_size(audio_file. stat().st_size)
+        
+        # 6. Limpiar archivo temporal
+        video. cleanup_file(audio_file)
+        
+        # 7. Calcular tiempo de procesamiento
+        processing_time = round(time.time() - start_time, 2)
+        
+        # 8. Completar job
+        print(f"✅ Job {job_id[: 8]} completado en {processing_time}s")
+        update_job(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="¡Audio extraído exitosamente!",
+            audio_url=audio_url,
+            file_size=file_size,
+            processing_time=processing_time,
+        )
+        
+    except Exception as e:
+        processing_time = round(time.time() - start_time, 2)
+        print(f"❌ Job {job_id[: 8]} falló después de {processing_time}s: {str(e)}")
+        
+        update_job(
+            job_id,
+            status="failed",
+            progress=0,
+            stage="Error",
+            error_code="EXTRACTION_FAILED",
+            error_message=str(e),
+            processing_time=processing_time,
         )
 
 
-async def download_and_extract(
-    url: str,
-    output_format: AudioFormat = AudioFormat.MP3,
-    quality: AudioQuality = AudioQuality.MEDIUM,
-    progress_callback: Optional[Callable[[str, int], None]] = None,
-) -> tuple[Path, VideoInfo]: 
-    settings = get_settings()
-    unique_id = str(uuid.uuid4())[:8]
+async def process_upload_job(
+    job_id: str,
+    video_file_path: Path,
+    filename: str,
+    audio_format: AudioFormat,
+    audio_quality: AudioQuality,
+) -> None:
+    """
+    Procesa un job de upload de forma asíncrona
+    Similar a process_job pero para archivos subidos
+    """
+    start_time = time.time()
+    temp_video_path = video_file_path
+    audio_file = None
     
-    # Detectar si es archivo directo (sin semáforo - no afectan a YouTube)
-    if is_direct_file_url(url):
-        print(f"🔗 Procesando URL directa: {url}")
+    try:
+        print(f"📤 Procesando upload job {job_id[:8]} - Archivo: {filename}")
         
-        # Descargar archivo
-        filename = urlparse(url).path.split('/')[-1] or f"video_{unique_id}. mp4"
-        temp_video = TEMP_DIR / f"{unique_id}_{filename}"
+        # 1. Validar archivo
+        update_job(job_id, status="processing", progress=5, stage="Validando archivo...")
         
-        if progress_callback:
-            progress_callback("downloading", 10)
+        if not temp_video_path.exists():
+            raise FileNotFoundError("Archivo temporal no encontrado")
         
-        await asyncio.to_thread(download_direct_file, url, temp_video)
+        # 2. Obtener información del video
+        update_job(job_id, status="processing", progress=10, stage="Analizando video...")
         
-        if progress_callback:
-            progress_callback("downloading", 50)
+        duration = await asyncio.to_thread(upload.get_video_duration, temp_video_path)
+        duration_formatted = video.format_duration(duration) if duration else "Desconocida"
         
-        # Obtener duración del archivo descargado
-        duration = await asyncio.to_thread(get_video_duration_from_file, temp_video)
+        video_size = temp_video_path.stat().st_size
+        video_size_formatted = upload.format_file_size(video_size)
+        
+        # Guardar info del video
+        update_job(
+            job_id,
+            progress=15,
+            video_title=filename,
+            video_duration=duration,
+        )
         
         # Validar duración
+        from .. config import get_settings
+        settings = get_settings()
         if duration and duration > settings.max_duration_minutes * 60:
-            cleanup_file(temp_video)
             raise ValueError(
                 f"Video muy largo ({duration // 60} min). "
                 f"Máximo permitido: {settings.max_duration_minutes} min"
             )
         
-        # Extraer audio usando función del módulo upload
-        if progress_callback:
-            progress_callback("extracting", 60)
+        # Validar tamaño
+        max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+        if video_size > max_size_bytes: 
+            raise ValueError(
+                f"Archivo muy grande ({video_size_formatted}). "
+                f"Máximo permitido: {settings.max_file_size_mb}MB"
+            )
         
-        from .  import upload
+        # 3. Extraer audio
+        update_job(job_id, status="extracting", progress=20, stage="Extrayendo audio...")
+        
         audio_file = await asyncio.to_thread(
             upload.extract_audio_from_file,
-            temp_video,
-            output_format,
-            quality
+            temp_video_path,
+            audio_format,
+            audio_quality,
         )
         
-        if progress_callback:
-            progress_callback("extracting", 90)
+        # 4. Subir a Supabase
+        update_job(job_id, status="uploading", progress=85, stage="Subiendo a la nube...")
         
-        # Limpiar video temporal
-        cleanup_file(temp_video)
+        audio_url = await asyncio.to_thread(storage.upload_file, audio_file)
         
-        # Crear VideoInfo
-        video_info = VideoInfo(
-            id="direct_file",
-            title=filename,
-            duration_seconds=duration or 0,
-            duration_formatted=format_duration(duration) if duration else "Desconocida",
-            thumbnail=None,
-            source="direct_url",
-            channel=None,
+        # 5. Obtener tamaño del archivo de audio
+        file_size = audio_file.stat().st_size
+        file_size_formatted = upload.format_file_size(file_size)
+        
+        # 6. Limpiar archivos temporales
+        upload.cleanup_file(temp_video_path)
+        upload.cleanup_file(audio_file)
+        
+        # 7. Calcular tiempo de procesamiento
+        processing_time = round(time.time() - start_time, 2)
+        
+        # 8. Completar job
+        print(f"✅ Upload job {job_id[:8]} completado en {processing_time}s - {file_size_formatted}")
+        update_job(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="¡Audio extraído exitosamente!",
+            audio_url=audio_url,
+            file_size=file_size_formatted,
+            processing_time=processing_time,
         )
         
-        return audio_file, video_info
-    
-    # YouTube/Vimeo (CON semáforo para limitar concurrencia)
-    async with _download_semaphore: 
-        active_downloads = 2 - _download_semaphore._value
-        print(f"🎬 Descargando video de {url} (descargas activas: {active_downloads}/2)")
+    except Exception as e:  
+        processing_time = round(time.time() - start_time, 2)
+        print(f"❌ Upload job {job_id[:8]} falló:  {str(e)}")
         
-        output_template = str(TEMP_DIR / f"{unique_id}_%(title).50s.%(ext)s")
+        # Limpiar archivos temporales en caso de error
+        if temp_video_path and temp_video_path.exists():
+            upload.cleanup_file(temp_video_path)
+        if audio_file and audio_file. exists():
+            upload.cleanup_file(audio_file)
         
-        def progress_hook(d):
-            if d["status"] == "downloading":
-                if progress_callback:
-                    percent = 0
-                    if d.get("total_bytes"):
-                        percent = int(d. get("downloaded_bytes", 0) / d["total_bytes"] * 50)
-                    elif d.get("total_bytes_estimate"):
-                        percent = int(d.get("downloaded_bytes", 0) / d["total_bytes_estimate"] * 50)
-                    progress_callback("downloading", percent)
-                
-                # Log de progreso de descarga
-                if d.get("total_bytes"):
-                    mb_downloaded = d.get("downloaded_bytes", 0) / (1024 * 1024)
-                    mb_total = d["total_bytes"] / (1024 * 1024)
-                    percent = int(d.get("downloaded_bytes", 0) / d["total_bytes"] * 100)
-                    print(f"   📥 Descarga: {mb_downloaded:.1f}/{mb_total:.1f} MB ({percent}%)")
-            elif d["status"] == "finished": 
-                print(f"   ✅ Descarga completada")
-                if progress_callback: 
-                    progress_callback("extracting", 60)
-        
-        def postprocessor_hook(d):
-            if d["status"] == "started":
-                print(f"   🎵 Extrayendo audio...")
-                if progress_callback:
-                    progress_callback("extracting", 70)
-            elif d["status"] == "finished":
-                print(f"   ✅ Audio extraído")
-                if progress_callback: 
-                    progress_callback("extracting", 90)
-        
-        ydl_opts = {
-            **get_base_ydl_opts(),
-            "outtmpl": output_template,
-            "progress_hooks": [progress_hook],
-            "postprocessor_hooks": [postprocessor_hook],
-            # === FORMATO ===
-            "format": "worstvideo+bestaudio/bestaudio/worst",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": output_format.value,
-                "preferredquality": quality.value,
-            }],
-        }
-        
-        def _download():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                duration = info.get("duration", 0) or 0
-                
-                if duration > settings.max_duration_minutes * 60:
-                    raise ValueError(
-                        f"Video muy largo ({duration // 60} min). "
-                        f"Máximo permitido: {settings.max_duration_minutes} min"
-                    )
-                
-                video_info = VideoInfo(
-                    id=info.get("id", "unknown"),
-                    title=info.get("title", "Sin título"),
-                    duration_seconds=duration,
-                    duration_formatted=format_duration(duration),
-                    thumbnail=info.get("thumbnail"),
-                    source=info.get("extractor", "unknown"),
-                    channel=info.get("channel") or info.get("uploader"),
-                )
-                
-                for file in TEMP_DIR.glob(f"{unique_id}_*"):
-                    if file.suffix == f".{output_format.value}":
-                        print(f"✅ Proceso completado: {video_info.title}")
-                        return file, video_info
-                
-                raise FileNotFoundError("No se encontró el archivo de audio generado")
-        
-        return await asyncio.to_thread(_download)
-
-
-def cleanup_file(file_path: Path) -> None:
-    try:
-        if file_path and file_path.exists():
-            file_path.unlink()
-    except Exception:
-        pass
-
-
-def cleanup_old_files(max_age_hours: int = 1) -> int:
-    import time
-    count = 0
-    now = time.time()
-    max_age_seconds = max_age_hours * 3600
-    
-    for file in TEMP_DIR.glob("*"):
-        if now - file. stat().st_mtime > max_age_seconds:
-            cleanup_file(file)
-            count += 1
-    return count
+        update_job(
+            job_id,
+            status="failed",
+            progress=0,
+            stage="Error",
+            error_code="UPLOAD_EXTRACTION_FAILED",
+            error_message=str(e),
+            processing_time=processing_time,
+        )
