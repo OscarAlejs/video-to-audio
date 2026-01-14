@@ -51,7 +51,10 @@ def get_base_ydl_opts() -> dict:
         # === FIX HTTP/2 ===
         "legacy_server_connect": True,
         "extractor_args": {
-            "youtube": {"player_client": "android"},
+            "youtube": {
+                "player_client": "android",
+                "player_skip": ["web"],
+            },
             "vimeo": {"http_version": "1.1"},
         },
     }
