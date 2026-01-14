@@ -1,42 +1,36 @@
 """
-Servicio para descarga y procesamiento de videos/audio usando yt-dlp.
-Diseñado para manejar múltiples plataformas y formatos.
+Servicio para descarga y procesamiento de videos/audio con yt-dlp.
 """
 
+import logging
 import os
 import re
-import logging
+import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Dict, Optional, Tuple
 
 import yt_dlp
 
-from ..config import DOWNLOAD_DIR, COOKIES_FILE
+from app.config import AUDIO_DIR, COOKIES_FILE, MAX_VIDEO_DURATION_MINUTES, TEMP_DIR
 
 logger = logging.getLogger(__name__)
 
 
-# ============================================================================
-# CONSTANTES DE CONFIGURACIÓN
-# ============================================================================
+def sanitize_filename(filename: str) -> str:
+    """
+    Elimina caracteres inválidos de un nombre de archivo.
+    """
+    # Eliminar caracteres no permitidos en nombres de archivo
+    filename = re.sub(r'[<>:"/\\|?*]', "", filename)
+    # Reemplazar espacios múltiples con uno solo
+    filename = re.sub(r"\s+", " ", filename)
+    # Limitar longitud
+    max_length = 200
+    if len(filename) > max_length:
+        name, ext = os.path.splitext(filename)
+        filename = name[: max_length - len(ext)] + ext
+    return filename.strip()
 
-MAX_FILE_SIZE_MB = 100
-MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
-
-# Formatos de audio preferidos en orden de calidad
-PREFERRED_AUDIO_FORMATS = ["m4a", "mp3", "opus", "webm"]
-
-# Patrones de URL soportados
-SUPPORTED_PLATFORMS = {
-    "youtube": r"(?:youtube\.com|youtu\.be)",
-    "vimeo": r"vimeo\.com",
-    "soundcloud": r"soundcloud\.com",
-}
-
-
-# ============================================================================
-# YT-DLP OPTIONS BUILDERS
-# ============================================================================
 
 def get_base_ydl_opts() -> dict:
     """Opciones optimizadas contra errores de conexión HTTP/2"""
@@ -44,11 +38,11 @@ def get_base_ydl_opts() -> dict:
         "quiet": True,
         "no_warnings": True,
         # === ESTABILIDAD MÁXIMA ===
-        "concurrent_fragment_downloads": 1,  # Sin concurrencia
-        "retries": 25,              # 10 → 25 (más reintentos)
-        "fragment_retries": 25,     # 10 → 25 (más reintentos por fragmento)
-        "file_access_retries": 10,  # Reintentos de acceso a archivo
-        "extractor_retries": 5,     # Reintentos de extractor
+        "concurrent_fragment_downloads": 1,  # Sin concurrencia (evita ConnectionTerminated)
+        "retries": 25,              # Aumentado de 10 a 25
+        "fragment_retries": 25,     # Aumentado de 10 a 25
+        "file_access_retries": 10,  # Nuevo
+        "extractor_retries": 5,     # Nuevo
         # === FIX HTTP/2 - FORZAR HTTP/1.1 ===
         "legacy_server_connect": True,
         "socket_timeout": 120,      # 2 minutos timeout
@@ -76,80 +70,9 @@ def get_base_ydl_opts() -> dict:
     return opts
 
 
-def get_info_opts() -> dict:
-    """Opciones específicas para extraer información"""
-    opts = get_base_ydl_opts()
-    opts.update({
-        "skip_download": True,
-        "ignoreerrors": False,
-    })
-    return opts
-
-
-def get_download_opts(output_path: Path, format_spec: str = "bestaudio") -> dict:
-    """Opciones específicas para descarga"""
-    opts = get_base_ydl_opts()
-    opts.update({
-        "format": format_spec,
-        "outtmpl": str(output_path),
-        "postprocessors": [],
-    })
-    return opts
-
-
-# ============================================================================
-# VALIDACIÓN Y UTILIDADES
-# ============================================================================
-
-def validate_url(url: str) -> bool:
-    """Valida si la URL es de una plataforma soportada"""
-    return any(re.search(pattern, url) for pattern in SUPPORTED_PLATFORMS.values())
-
-
-def sanitize_filename(filename: str) -> str:
-    """Sanitiza nombre de archivo eliminando caracteres no válidos"""
-    # Reemplazar caracteres problemáticos
-    invalid_chars = '<>:"/\\|?*'
-    for char in invalid_chars:
-        filename = filename.replace(char, "_")
-    
-    # Limitar longitud (Windows tiene límite de 255 caracteres)
-    max_length = 200
-    if len(filename) > max_length:
-        name, ext = os.path.splitext(filename)
-        filename = name[:max_length - len(ext)] + ext
-    
-    return filename.strip()
-
-
-def estimate_file_size(info: Dict[str, Any]) -> Optional[int]:
-    """Estima el tamaño del archivo en bytes"""
-    # Intentar obtener tamaño directo
-    if "filesize" in info and info["filesize"]:
-        return info["filesize"]
-    
-    if "filesize_approx" in info and info["filesize_approx"]:
-        return info["filesize_approx"]
-    
-    # Calcular basado en bitrate y duración
-    duration = info.get("duration")
-    bitrate = info.get("abr") or info.get("tbr")
-    
-    if duration and bitrate:
-        # bitrate en kbps, duration en segundos
-        estimated_size = (bitrate * 1000 * duration) / 8
-        return int(estimated_size)
-    
-    return None
-
-
-# ============================================================================
-# FUNCIONES PRINCIPALES
-# ============================================================================
-
-def get_video_info(url: str) -> Dict[str, Any]:
+def get_video_info(url: str) -> Dict:
     """
-    Extrae información del video sin descargarlo.
+    Obtiene información del video sin descargarlo.
     
     Args:
         url: URL del video
@@ -158,152 +81,159 @@ def get_video_info(url: str) -> Dict[str, Any]:
         Dict con información del video
         
     Raises:
-        ValueError: Si la URL no es válida
-        yt_dlp.utils.DownloadError: Si hay error al extraer información
+        Exception: Si hay error al obtener info
     """
-    if not validate_url(url):
-        raise ValueError(f"URL no soportada: {url}")
-    
-    logger.info(f"Extrayendo información de: {url}")
-    
-    ydl_opts = get_info_opts()
+    ydl_opts = get_base_ydl_opts()
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            logger.info(f"Obteniendo información de: {url}")
             info = ydl.extract_info(url, download=False)
             
-            # Extraer información relevante
-            result = {
-                "title": info.get("title", "Unknown"),
-                "duration": info.get("duration", 0),
-                "uploader": info.get("uploader", "Unknown"),
+            # Validar duración
+            duration_seconds = info.get("duration", 0)
+            max_duration_seconds = MAX_VIDEO_DURATION_MINUTES * 60
+            
+            if duration_seconds > max_duration_seconds:
+                raise ValueError(
+                    f"El video dura {duration_seconds//60} minutos. "
+                    f"Máximo permitido: {MAX_VIDEO_DURATION_MINUTES} minutos"
+                )
+            
+            return {
+                "title": info.get("title", "Sin título"),
+                "duration": duration_seconds,
                 "thumbnail": info.get("thumbnail"),
-                "description": info.get("description", ""),
-                "formats_available": len(info.get("formats", [])),
+                "uploader": info.get("uploader", "Desconocido"),
+                "webpage_url": info.get("webpage_url", url),
             }
             
-            # Estimar tamaño
-            estimated_size = estimate_file_size(info)
-            if estimated_size:
-                result["estimated_size_mb"] = round(estimated_size / (1024 * 1024), 2)
-            
-            logger.info(f"Información extraída: {result['title']}")
-            return result
-            
     except Exception as e:
-        logger.error(f"Error extrayendo información: {str(e)}")
+        logger.error(f"Error al obtener info del video: {e}")
         raise
 
 
 def download_audio(
-    url: str,
-    output_filename: Optional[str] = None,
-    preferred_format: str = "m4a"
-) -> Path:
+    url: str, format_preference: str = "mp3", bitrate: str = "192"
+) -> Tuple[Path, Dict]:
     """
-    Descarga solo el audio de un video.
+    Descarga el audio de un video en el formato especificado.
     
     Args:
         url: URL del video
-        output_filename: Nombre personalizado para el archivo (sin extensión)
-        preferred_format: Formato de audio preferido
+        format_preference: Formato de audio deseado (mp3, m4a, opus)
+        bitrate: Bitrate del audio (64, 128, 192, 256, 320)
         
     Returns:
-        Path al archivo descargado
+        Tuple con (ruta del archivo, info del video)
         
     Raises:
-        ValueError: Si la URL no es válida o el archivo excede el tamaño máximo
-        yt_dlp.utils.DownloadError: Si hay error en la descarga
+        Exception: Si hay error en la descarga
     """
-    if not validate_url(url):
-        raise ValueError(f"URL no soportada: {url}")
+    # Validar formato
+    valid_formats = ["mp3", "m4a", "opus"]
+    if format_preference not in valid_formats:
+        format_preference = "mp3"
     
-    logger.info(f"Iniciando descarga de audio desde: {url}")
+    # Validar bitrate
+    valid_bitrates = ["64", "128", "192", "256", "320"]
+    if bitrate not in valid_bitrates:
+        bitrate = "192"
     
-    # Verificar tamaño estimado
+    # Crear directorio temporal si no existe
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Obtener info primero
     info = get_video_info(url)
-    estimated_size = info.get("estimated_size_mb")
-    if estimated_size and estimated_size > MAX_FILE_SIZE_MB:
-        raise ValueError(
-            f"Archivo muy grande ({estimated_size:.2f}MB). "
-            f"Máximo permitido: {MAX_FILE_SIZE_MB}MB"
-        )
     
-    # Preparar nombre de archivo
-    if not output_filename:
-        output_filename = sanitize_filename(info["title"])
-    else:
-        output_filename = sanitize_filename(output_filename)
+    # Sanitizar título para nombre de archivo
+    safe_title = sanitize_filename(info["title"])
     
-    # Path de salida (sin extensión, yt-dlp la añadirá)
-    output_path = DOWNLOAD_DIR / output_filename
-    
-    # Configurar formato de audio
-    format_spec = f"bestaudio[ext={preferred_format}]/bestaudio"
-    
-    ydl_opts = get_download_opts(output_path, format_spec)
+    # Configurar opciones de descarga
+    ydl_opts = get_base_ydl_opts()
+    ydl_opts.update(
+        {
+            "format": "bestaudio/best",
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": format_preference,
+                    "preferredquality": bitrate,
+                }
+            ],
+            "outtmpl": str(TEMP_DIR / f"{safe_title}.%(ext)s"),
+            "keepvideo": False,
+        }
+    )
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            logger.info(f"Descargando: {info['title']}")
+            logger.info(f"Descargando audio de: {url}")
             ydl.download([url])
             
             # Buscar archivo descargado
-            downloaded_files = list(DOWNLOAD_DIR.glob(f"{output_filename}.*"))
+            expected_file = TEMP_DIR / f"{safe_title}.{format_preference}"
             
-            if not downloaded_files:
-                raise FileNotFoundError("No se encontró el archivo descargado")
+            if not expected_file.exists():
+                # Buscar cualquier archivo con el título
+                matching_files = list(TEMP_DIR.glob(f"{safe_title}.*"))
+                if matching_files:
+                    expected_file = matching_files[0]
+                else:
+                    raise FileNotFoundError(
+                        f"No se encontró el archivo descargado: {expected_file}"
+                    )
             
-            downloaded_file = downloaded_files[0]
+            # Mover a directorio final
+            AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+            final_path = AUDIO_DIR / expected_file.name
             
-            # Verificar tamaño real
-            file_size_mb = downloaded_file.stat().st_size / (1024 * 1024)
-            if file_size_mb > MAX_FILE_SIZE_MB:
-                downloaded_file.unlink()  # Eliminar archivo
-                raise ValueError(
-                    f"Archivo descargado muy grande ({file_size_mb:.2f}MB). "
-                    f"Máximo: {MAX_FILE_SIZE_MB}MB"
-                )
+            # Si ya existe, agregar sufijo numérico
+            counter = 1
+            while final_path.exists():
+                stem = expected_file.stem
+                suffix = expected_file.suffix
+                final_path = AUDIO_DIR / f"{stem}_{counter}{suffix}"
+                counter += 1
             
-            logger.info(
-                f"Descarga completada: {downloaded_file.name} "
-                f"({file_size_mb:.2f}MB)"
-            )
-            return downloaded_file
+            shutil.move(str(expected_file), str(final_path))
+            logger.info(f"Audio guardado en: {final_path}")
+            
+            return final_path, info
             
     except Exception as e:
-        logger.error(f"Error en descarga: {str(e)}")
+        logger.error(f"Error al descargar audio: {e}")
+        # Limpiar archivos temporales
+        for f in TEMP_DIR.glob(f"{safe_title}.*"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
         raise
 
 
-def cleanup_old_files(max_age_hours: int = 24) -> int:
+def cleanup_temp_files() -> int:
     """
-    Limpia archivos antiguos del directorio de descargas.
+    Limpia archivos temporales antiguos (más de 1 hora).
     
-    Args:
-        max_age_hours: Edad máxima en horas
-        
     Returns:
         Número de archivos eliminados
     """
     import time
     
+    deleted = 0
     current_time = time.time()
-    max_age_seconds = max_age_hours * 3600
-    deleted_count = 0
+    max_age = 3600  # 1 hora en segundos
     
-    for file_path in DOWNLOAD_DIR.glob("*"):
-        if file_path.is_file():
-            file_age = current_time - file_path.stat().st_mtime
-            if file_age > max_age_seconds:
-                try:
+    try:
+        for file_path in TEMP_DIR.glob("*"):
+            if file_path.is_file():
+                file_age = current_time - file_path.stat().st_mtime
+                if file_age > max_age:
                     file_path.unlink()
-                    deleted_count += 1
-                    logger.info(f"Archivo eliminado: {file_path.name}")
-                except Exception as e:
-                    logger.error(f"Error eliminando {file_path.name}: {str(e)}")
+                    deleted += 1
+                    logger.info(f"Archivo temporal eliminado: {file_path.name}")
+    except Exception as e:
+        logger.error(f"Error al limpiar archivos temporales: {e}")
     
-    if deleted_count > 0:
-        logger.info(f"Limpieza completada: {deleted_count} archivos eliminados")
-    
-    return deleted_count
+    return deleted
