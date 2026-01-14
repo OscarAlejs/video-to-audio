@@ -280,19 +280,19 @@ def download_and_extract(
             if progress_callback:
                 progress_callback("extracting", 90)
     
-    ydl_opts = {
-        **get_base_ydl_opts(),
-        "outtmpl": output_template,
-        "progress_hooks": [progress_hook],
-        "postprocessor_hooks": [postprocessor_hook],
-        # === FORMATO ===
-        "format": "worstvideo+bestaudio/bestaudio/worst",
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": output_format.value,
-            "preferredquality": quality.value,
-        }],
-    }
+ydl_opts = {
+    **get_base_ydl_opts(),
+    "outtmpl": output_template,
+    "progress_hooks": [progress_hook],
+    "postprocessor_hooks": [postprocessor_hook],
+    # === FORMATO ===
+    "format": "bestaudio/best",  # Más compatible, siempre encuentra un formato
+    "postprocessors":  [{
+        "key": "FFmpegExtractAudio",
+        "preferredcodec": output_format.value,
+        "preferredquality": quality.value,
+    }],
+}}
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
