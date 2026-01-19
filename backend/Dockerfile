@@ -1,13 +1,22 @@
 FROM python:3.12-slim
 
+# Install base dependencies (without nodejs - we'll install a newer version)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     nginx \
     supervisor \
-    nodejs \
-    npm \
+    gnupg \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20.x LTS from NodeSource (required for yt-dlp JS challenge solving)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install yt-dlp-ejs globally for YouTube JS challenge solving
+RUN npm install -g yt-dlp-ejs@latest
 
 WORKDIR /app
 

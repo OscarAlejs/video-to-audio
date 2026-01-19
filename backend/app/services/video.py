@@ -78,9 +78,14 @@ def get_base_ydl_opts() -> dict:
         # === EXTRACTOR - evitar HLS ===
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "web"],
+                "player_client": ["web", "mweb"],
                 "skip": ["hls", "translated_subs"],
             },
+        },
+
+        # === JS RUNTIME para resolver n-challenge de YouTube ===
+        "js_runtimes": {
+            "node": {},
         },
     }
 
