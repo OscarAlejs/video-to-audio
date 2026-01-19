@@ -44,27 +44,28 @@ def get_base_ydl_opts() -> dict:
     """
     opts = {
         # === FORMATO ===
-        "format": "bestaudio/best",  # ✅ Solo audio, mejor calidad disponible
-        
+        # bestaudio* permite formatos DASH que muchos videos requieren
+        # /best es fallback si no hay audio separado
+        "format": "bestaudio*/best",
+
         # === LOGGING ===
         "quiet": True,
         "no_warnings": True,
-        
+
         # === REINTENTOS Y TIMEOUTS ===
         "retries": 10,
         "fragment_retries": 10,
         "socket_timeout": 30,
-        
+
         # === CONEXIÓN ===
         "http_chunk_size": 10485760,  # 10MB chunks - balance entre estabilidad y velocidad
-        
+
         # === EXTRACTOR MODERNO (2025) ===
         "extractor_args": {
             "youtube": {
-                # ✅ Probar múltiples clientes en orden
+                # Probar múltiples clientes en orden
                 "player_client": ["ios", "android", "web"],
-                # ✅ Evitar formatos problemáticos
-                "skip": ["hls", "dash"],
+                # NO bloquear DASH - muchos videos solo tienen audio en DASH
             },
         },
     }
