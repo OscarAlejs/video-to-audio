@@ -32,3 +32,6 @@ Thumbs.db
 # Temp files
 /tmp/
 *.tmp
+
+# Reports
+YOUTUBE_FIX_REPORT.md
