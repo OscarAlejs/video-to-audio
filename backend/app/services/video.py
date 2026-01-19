@@ -43,7 +43,6 @@ def get_base_ydl_opts() -> dict:
     """
     opts = {
         # === FORMATO ===
-        # Dejar que yt-dlp elija el mejor formato disponible
         "format": "ba/b",  # best audio, fallback to best
 
         # === LOGGING ===
@@ -51,14 +50,19 @@ def get_base_ydl_opts() -> dict:
         "no_warnings": True,
 
         # === REINTENTOS Y TIMEOUTS ===
-        "retries": 10,
-        "fragment_retries": 10,
-        "socket_timeout": 30,
+        "retries": 15,
+        "fragment_retries": 15,
+        "file_access_retries": 5,
+        "socket_timeout": 60,
 
-        # === CONEXIÓN ===
-        "http_chunk_size": 10485760,  # 10MB chunks
+        # === DESCARGA ROBUSTA ===
+        "http_chunk_size": 1048576,  # 1MB chunks (más pequeños = más estable)
+        "continuedl": True,  # Continuar descargas parciales
+        "noprogress": False,
+        "buffersize": 1024 * 16,  # 16KB buffer
 
-        # === SIN extractor_args - dejar defaults de yt-dlp ===
+        # === EXTRACTOR ===
+        "extractor_retries": 5,
     }
 
     # Agregar cookies si existen
