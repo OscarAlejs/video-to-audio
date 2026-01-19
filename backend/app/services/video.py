@@ -43,7 +43,9 @@ def get_base_ydl_opts() -> dict:
     """
     opts = {
         # === FORMATO ===
-        "format": "ba/b",  # best audio, fallback to best
+        # ba* = mejor formato CON audio (puede incluir video)
+        # /b = fallback a mejor formato disponible
+        "format": "ba*/b",
 
         # === LOGGING ===
         "quiet": True,
@@ -54,16 +56,9 @@ def get_base_ydl_opts() -> dict:
         "fragment_retries": 10,
         "socket_timeout": 60,
 
-        # === ANTI-THROTTLING (clave para YouTube) ===
-        "throttled_rate": "70K",  # Re-extrae si baja de 70KB/s
-        "concurrent_fragment_downloads": 4,  # Fragmentos DASH en paralelo
-
-        # === EXTRACTOR ===
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["ios", "web"],
-            },
-        },
+        # === ANTI-THROTTLING ===
+        "throttled_rate": "70K",
+        "concurrent_fragment_downloads": 4,
     }
 
     # Agregar cookies si existen
