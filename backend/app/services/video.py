@@ -1,5 +1,5 @@
 """
-Servicio de descarga y extracción de audio
+Servicio de descarga y extracción de audio - VERSIÓN OPTIMIZADA 2025
 """
 import uuid
 import requests
@@ -38,28 +38,41 @@ def format_file_size(bytes_size: int) -> str:
 
 
 def get_base_ydl_opts() -> dict:
-    """Opciones base - estabilidad sobre velocidad"""
+    """
+    Opciones base de yt-dlp - SIMPLIFICADAS Y MODERNAS (2025)
+    Prioriza estabilidad sobre configuraciones complejas
+    """
     opts = {
+        # === FORMATO ===
+        "format": "bestaudio/best",  # ✅ Solo audio, mejor calidad disponible
+        
+        # === LOGGING ===
         "quiet": True,
         "no_warnings": True,
-        # === ESTABILIDAD ===
-        "concurrent_fragment_downloads": 1,  # Sin concurrencia (evita ConnectionTerminated)
+        
+        # === REINTENTOS Y TIMEOUTS ===
         "retries": 10,
         "fragment_retries": 10,
         "socket_timeout": 30,
-        "http_chunk_size": 10485760,  # 10MB - refresca conexiones periódicamente
-        # === FIX HTTP/2 ===
-        "legacy_server_connect": True,
+        
+        # === CONEXIÓN ===
+        "http_chunk_size": 10485760,  # 10MB chunks - balance entre estabilidad y velocidad
+        
+        # === EXTRACTOR MODERNO (2025) ===
         "extractor_args": {
             "youtube": {
-                "player_client": "android",
-                "player_skip": ["web"],
+                # ✅ Probar múltiples clientes en orden
+                "player_client": ["ios", "android", "web"],
+                # ✅ Evitar formatos problemáticos
+                "skip": ["hls", "dash"],
             },
-            "vimeo": {"http_version": "1.1"},
         },
     }
+    
+    # Agregar cookies si existen
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
+    
     return opts
 
 
@@ -148,10 +161,10 @@ def get_video_info(url: str) -> VideoInfo:
             channel=None,
         )
     
-    # YouTube/Vimeo (código existente)
+    # YouTube/Vimeo
     ydl_opts = {
         **get_base_ydl_opts(),
-        "extract_flat": False,
+        "extract_flat": False,  # Obtener info completa
     }
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -175,10 +188,15 @@ def download_and_extract(
     quality: AudioQuality = AudioQuality.MEDIUM,
     progress_callback: Optional[Callable[[str, int], None]] = None,
 ) -> tuple[Path, VideoInfo]:
+    """
+    Descarga y extrae audio de YouTube/Vimeo o archivos directos
+    """
     settings = get_settings()
     unique_id = str(uuid.uuid4())[:8]
     
-    # Detectar si es archivo directo
+    # ============================================
+    # CASO 1: URL DIRECTA DE ARCHIVO
+    # ============================================
     if is_direct_file_url(url):
         print(f"🔗 Procesando URL directa: {url}")
         
@@ -235,7 +253,9 @@ def download_and_extract(
         
         return audio_file, video_info
     
-    # YouTube/Vimeo (código existente)
+    # ============================================
+    # CASO 2: YOUTUBE/VIMEO
+    # ============================================
     output_template = str(TEMP_DIR / f"{unique_id}_%(title).50s.%(ext)s")
     
     print(f"🎬 Descargando video de {url}")
@@ -276,8 +296,7 @@ def download_and_extract(
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
-        # === FORMATO ===
-        "format": "worstvideo+bestaudio/bestaudio/worst",
+        # ✅ Ya no necesitamos poner format aquí (viene de get_base_ydl_opts)
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": output_format.value,
@@ -289,6 +308,7 @@ def download_and_extract(
         info = ydl.extract_info(url, download=True)
         duration = info.get("duration", 0) or 0
         
+        # Validar duración
         if duration > settings.max_duration_minutes * 60:
             raise ValueError(
                 f"Video muy largo ({duration // 60} min). "
@@ -305,6 +325,7 @@ def download_and_extract(
             channel=info.get("channel") or info.get("uploader"),
         )
         
+        # Buscar el archivo de audio generado
         for file in TEMP_DIR.glob(f"{unique_id}_*"):
             if file.suffix == f".{output_format.value}":
                 print(f"✅ Proceso completado: {video_info.title}")
@@ -314,6 +335,7 @@ def download_and_extract(
 
 
 def cleanup_file(file_path: Path) -> None:
+    """Elimina un archivo temporal"""
     try:
         if file_path and file_path.exists():
             file_path.unlink()
@@ -322,6 +344,7 @@ def cleanup_file(file_path: Path) -> None:
 
 
 def cleanup_old_files(max_age_hours: int = 1) -> int:
+    """Limpia archivos antiguos del directorio temporal"""
     import time
     count = 0
     now = time.time()
