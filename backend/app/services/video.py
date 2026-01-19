@@ -53,16 +53,21 @@ def get_base_ydl_opts() -> dict:
         "retries": 15,
         "fragment_retries": 15,
         "file_access_retries": 5,
-        "socket_timeout": 60,
+        "socket_timeout": 120,
 
-        # === DESCARGA ROBUSTA ===
-        "http_chunk_size": 1048576,  # 1MB chunks (más pequeños = más estable)
-        "continuedl": True,  # Continuar descargas parciales
-        "noprogress": False,
-        "buffersize": 1024 * 16,  # 16KB buffer
+        # === ANTI-THROTTLING ===
+        "throttled_rate": "100K",  # Bypass throttle detection
+        "http_chunk_size": 1048576,  # 1MB chunks
+        "continuedl": True,
 
         # === EXTRACTOR ===
         "extractor_retries": 5,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["web"],  # Cliente web más estable
+                "player_skip": ["webpage"],  # Saltar webpage player
+            },
+        },
     }
 
     # Agregar cookies si existen
