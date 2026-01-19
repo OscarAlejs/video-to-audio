@@ -39,14 +39,12 @@ def format_file_size(bytes_size: int) -> str:
 
 def get_base_ydl_opts() -> dict:
     """
-    Opciones base de yt-dlp - SIMPLIFICADAS Y MODERNAS (2025)
-    Prioriza estabilidad sobre configuraciones complejas
+    Opciones base de yt-dlp - CONFIGURACIÓN ROBUSTA 2025
     """
     opts = {
         # === FORMATO ===
-        # bestaudio* permite formatos DASH que muchos videos requieren
-        # /best es fallback si no hay audio separado
-        "format": "bestaudio*/best",
+        # Dejar que yt-dlp elija el mejor formato disponible
+        "format": "ba/b",  # best audio, fallback to best
 
         # === LOGGING ===
         "quiet": True,
@@ -58,22 +56,15 @@ def get_base_ydl_opts() -> dict:
         "socket_timeout": 30,
 
         # === CONEXIÓN ===
-        "http_chunk_size": 10485760,  # 10MB chunks - balance entre estabilidad y velocidad
+        "http_chunk_size": 10485760,  # 10MB chunks
 
-        # === EXTRACTOR MODERNO (2025) ===
-        "extractor_args": {
-            "youtube": {
-                # Probar múltiples clientes en orden
-                "player_client": ["ios", "android", "web"],
-                # NO bloquear DASH - muchos videos solo tienen audio en DASH
-            },
-        },
+        # === SIN extractor_args - dejar defaults de yt-dlp ===
     }
-    
+
     # Agregar cookies si existen
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
-    
+
     return opts
 
 
