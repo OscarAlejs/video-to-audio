@@ -11,7 +11,6 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir --upgrade yt-dlp
 
 COPY app/ ./app/
 COPY cookies.tx[t] ./

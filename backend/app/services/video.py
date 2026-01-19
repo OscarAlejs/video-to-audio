@@ -50,22 +50,18 @@ def get_base_ydl_opts() -> dict:
         "no_warnings": True,
 
         # === REINTENTOS Y TIMEOUTS ===
-        "retries": 15,
-        "fragment_retries": 15,
-        "file_access_retries": 5,
-        "socket_timeout": 120,
+        "retries": 10,
+        "fragment_retries": 10,
+        "socket_timeout": 60,
 
-        # === ANTI-THROTTLING ===
-        "throttled_rate": "100K",  # Bypass throttle detection
-        "http_chunk_size": 1048576,  # 1MB chunks
-        "continuedl": True,
+        # === ANTI-THROTTLING (clave para YouTube) ===
+        "throttled_rate": "70K",  # Re-extrae si baja de 70KB/s
+        "concurrent_fragment_downloads": 4,  # Fragmentos DASH en paralelo
 
         # === EXTRACTOR ===
-        "extractor_retries": 5,
         "extractor_args": {
             "youtube": {
-                "player_client": ["web"],  # Cliente web más estable
-                "player_skip": ["webpage"],  # Saltar webpage player
+                "player_client": ["ios", "web"],
             },
         },
     }
