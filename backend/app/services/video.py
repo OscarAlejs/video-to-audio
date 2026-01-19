@@ -61,7 +61,8 @@ def get_base_ydl_opts() -> dict:
     """
     opts = {
         # === FORMATO ===
-        "format": "ba*/b",
+        # Evitar HLS (m3u8) que causa 403, preferir DASH o progressive
+        "format": "ba[protocol!=m3u8]/ba[protocol!=m3u8_native]/ba*/b",
 
         # === LOGGING VERBOSE (debug) ===
         "quiet": False,
@@ -74,9 +75,13 @@ def get_base_ydl_opts() -> dict:
         "fragment_retries": 10,
         "socket_timeout": 60,
 
-        # === ANTI-THROTTLING ===
-        "throttled_rate": "70K",
-        "concurrent_fragment_downloads": 4,
+        # === EXTRACTOR - evitar HLS ===
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],
+                "skip": ["hls", "translated_subs"],
+            },
+        },
     }
 
     # Agregar cookies si existen
