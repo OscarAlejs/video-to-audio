@@ -37,19 +37,37 @@ def format_file_size(bytes_size: int) -> str:
     return f"{bytes_size:.1f} TB"
 
 
+class YTDLPLogger:
+    """Logger para capturar mensajes de yt-dlp"""
+    def debug(self, msg):
+        if msg.startswith('[debug]'):
+            print(f"[yt-dlp DEBUG] {msg}")
+        else:
+            print(f"[yt-dlp] {msg}")
+
+    def info(self, msg):
+        print(f"[yt-dlp INFO] {msg}")
+
+    def warning(self, msg):
+        print(f"[yt-dlp WARN] {msg}")
+
+    def error(self, msg):
+        print(f"[yt-dlp ERROR] {msg}")
+
+
 def get_base_ydl_opts() -> dict:
     """
     Opciones base de yt-dlp - CONFIGURACIÓN ROBUSTA 2025
     """
     opts = {
         # === FORMATO ===
-        # ba* = mejor formato CON audio (puede incluir video)
-        # /b = fallback a mejor formato disponible
         "format": "ba*/b",
 
-        # === LOGGING ===
-        "quiet": True,
-        "no_warnings": True,
+        # === LOGGING VERBOSE (debug) ===
+        "quiet": False,
+        "no_warnings": False,
+        "verbose": True,
+        "logger": YTDLPLogger(),
 
         # === REINTENTOS Y TIMEOUTS ===
         "retries": 10,
@@ -64,6 +82,9 @@ def get_base_ydl_opts() -> dict:
     # Agregar cookies si existen
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
+        print(f"[CONFIG] Usando cookies: {COOKIES_FILE}")
+    else:
+        print(f"[CONFIG] No se encontraron cookies en {COOKIES_FILE}")
 
     return opts
 
@@ -254,24 +275,29 @@ def download_and_extract(
     
     def progress_hook(d):
         if d["status"] == "downloading":
-            if progress_callback:
-                percent = 0
-                if d.get("total_bytes"):
-                    percent = int(d.get("downloaded_bytes", 0) / d["total_bytes"] * 50)
-                elif d.get("total_bytes_estimate"):
-                    percent = int(d.get("downloaded_bytes", 0) / d["total_bytes_estimate"] * 50)
-                progress_callback("downloading", percent)
-            
-            # Log de progreso de descarga
-            if d.get("total_bytes"):
-                mb_downloaded = d.get("downloaded_bytes", 0) / (1024 * 1024)
-                mb_total = d["total_bytes"] / (1024 * 1024)
-                percent = int(d.get("downloaded_bytes", 0) / d["total_bytes"] * 100)
-                print(f"   📥 Descarga: {mb_downloaded:.1f}/{mb_total:.1f} MB ({percent}%)")
+            downloaded = d.get("downloaded_bytes", 0)
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            speed = d.get("speed") or 0
+            eta = d.get("eta") or 0
+
+            if total > 0:
+                percent = int(downloaded / total * 100)
+                speed_kb = speed / 1024 if speed else 0
+                print(f"   📥 {percent}% | {downloaded/(1024*1024):.1f}/{total/(1024*1024):.1f} MB | {speed_kb:.0f} KB/s | ETA: {eta}s")
+
+                if progress_callback:
+                    progress_callback("downloading", int(percent * 0.5))
+            else:
+                # Sin total conocido, mostrar solo bytes descargados
+                print(f"   📥 Descargado: {downloaded/(1024*1024):.2f} MB | Velocidad: {speed/1024 if speed else 0:.0f} KB/s")
+
         elif d["status"] == "finished":
-            print(f"   ✅ Descarga completada")
+            filename = d.get("filename", "unknown")
+            print(f"   ✅ Descarga completada: {filename}")
             if progress_callback:
                 progress_callback("extracting", 60)
+        elif d["status"] == "error":
+            print(f"   ❌ Error en descarga: {d}")
     
     def postprocessor_hook(d):
         if d["status"] == "started":
